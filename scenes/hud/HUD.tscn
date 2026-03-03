@@ -1,0 +1,72 @@
+[gd_scene load_steps=4 format=3 uid="uid://hud_scene"]
+
+[ext_resource type="Script" path="res://scenes/hud/HUD.gd" id="1_hud"]
+[ext_resource type="PackedScene" path="res://scenes/hud/StatBar.tscn" id="2_statbar"]
+[ext_resource type="PackedScene" path="res://scenes/hud/DialogueBox.tscn" id="3_dialogue"]
+
+[node name="HUD" type="CanvasLayer"]
+script = ExtResource("1_hud")
+
+[node name="StatPanel" type="VBoxContainer" parent="."]
+anchors_preset = 3
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 0.0
+anchor_bottom = 0.0
+offset_right = 220.0
+offset_bottom = 120.0
+
+[node name="HealthBar" parent="StatPanel" instance=ExtResource("2_statbar")]
+stat_label_text = "HP"
+bar_color = Color(0.8, 0.1, 0.1, 1)
+
+[node name="HungerBar" parent="StatPanel" instance=ExtResource("2_statbar")]
+stat_label_text = "Food"
+bar_color = Color(0.9, 0.6, 0.1, 1)
+
+[node name="ThirstBar" parent="StatPanel" instance=ExtResource("2_statbar")]
+stat_label_text = "H2O"
+bar_color = Color(0.1, 0.5, 0.9, 1)
+
+[node name="FatigueBar" parent="StatPanel" instance=ExtResource("2_statbar")]
+stat_label_text = "Rest"
+bar_color = Color(0.4, 0.4, 0.9, 1)
+
+[node name="StaminaBar" parent="StatPanel" instance=ExtResource("2_statbar")]
+stat_label_text = "STM"
+bar_color = Color(0.2, 0.85, 0.45, 1)
+
+[node name="BleedLabel" type="Label" parent="StatPanel"]
+text = "!! BLEEDING !!"
+modulate = Color(0.8, 0.1, 0.1, 1)
+visible = false
+
+[node name="DialogueBox" parent="." instance=ExtResource("3_dialogue")]
+
+[node name="TradeMenu" type="Control" parent="."]
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -150.0
+offset_top = -200.0
+offset_right = 150.0
+offset_bottom = 200.0
+visible = false
+
+[node name="Panel" type="PanelContainer" parent="TradeMenu"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+
+[node name="VBox" type="VBoxContainer" parent="TradeMenu/Panel"]
+layout_mode = 2
+
+[node name="ItemList" type="VBoxContainer" parent="TradeMenu/Panel/VBox"]
+layout_mode = 2
+
+[node name="CloseButton" type="Button" parent="TradeMenu/Panel/VBox"]
+layout_mode = 2
+text = "Close"

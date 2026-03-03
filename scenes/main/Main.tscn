@@ -1,0 +1,10 @@
+[gd_scene format=3 uid="uid://d3wvc0712h2xl"]
+
+[ext_resource type="Script" uid="uid://hkvc3ci4lni6" path="res://scenes/main/Main.gd" id="1_main"]
+[ext_resource type="PackedScene" path="res://scenes/lobby/Lobby.tscn" id="2_lobby"]
+
+[node name="Main" type="Node" unique_id=7982434]
+script = ExtResource("1_main")
+
+[node name="Lobby" parent="." unique_id=1108481600 instance=ExtResource("2_lobby")]
+layout_mode = 3

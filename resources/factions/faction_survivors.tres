@@ -1,0 +1,20 @@
+[gd_resource type="Resource" script_class="FactionData" load_steps=2 format=3 uid="uid://faction_survivors"]
+
+[ext_resource type="Script" path="res://scripts/faction/FactionData.gd" id="1_faction_data"]
+
+[resource]
+script = ExtResource("1_faction_data")
+faction_id = "survivors"
+faction_name = "The Survivors"
+hostile_threshold = -30.0
+friendly_threshold = 10.0
+allied_threshold = 50.0
+reputation_events = {
+"killed_faction_member": -25.0,
+"traded": 5.0,
+"completed_quest": 20.0,
+"defended_member": 15.0,
+"stole_from_camp": -15.0,
+"shared_supplies": 8.0
+}
+default_reputation = 0.0

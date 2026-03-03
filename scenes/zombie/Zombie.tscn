@@ -1,0 +1,64 @@
+[gd_scene load_steps=12 format=3 uid="uid://zombie_scene"]
+
+[ext_resource type="Script" path="res://scenes/zombie/Zombie.gd" id="1_zombie"]
+[ext_resource type="Script" path="res://scenes/zombie/ZombieStateMachine.gd" id="2_zsm"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateIdle.gd" id="3_idle"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateWander.gd" id="4_wander"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateAlerted.gd" id="5_alerted"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateChase.gd" id="6_chase"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateAttack.gd" id="7_attack"]
+[ext_resource type="Script" path="res://scripts/ai/SightCone.gd" id="8_sight"]
+[ext_resource type="Script" path="res://scenes/zombie/states/ZombieStateSearch.gd" id="9_search"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_1"]
+
+[node name="Zombie" type="CharacterBody2D"]
+script = ExtResource("1_zombie")
+collision_layer = 2
+collision_mask = 9
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape2D_1")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+y_sort_origin = -16
+
+[node name="ZombieStateMachine" type="Node" parent="."]
+script = ExtResource("2_zsm")
+
+[node name="ZombieStateIdle" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("3_idle")
+
+[node name="ZombieStateWander" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("4_wander")
+
+[node name="ZombieStateAlerted" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("5_alerted")
+
+[node name="ZombieStateChase" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("6_chase")
+
+[node name="ZombieStateAttack" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("7_attack")
+
+[node name="ZombieStateSearch" type="Node" parent="ZombieStateMachine"]
+script = ExtResource("9_search")
+
+[node name="SightCone" type="Node" parent="."]
+script = ExtResource("8_sight")
+
+[node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
+path_desired_distance = 4.0
+target_desired_distance = 4.0
+
+[node name="HordeAlertArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 2
+
+[node name="HordeCollisionShape" type="CollisionShape2D" parent="HordeAlertArea"]
+shape = SubResource("CircleShape2D_1")
+
+[node name="MultiplayerSynchronizer" type="MultiplayerSynchronizer" parent="."]
+replication_config = null

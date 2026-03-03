@@ -1,0 +1,54 @@
+[gd_scene load_steps=8 format=3 uid="uid://world_scene"]
+
+[ext_resource type="Script" path="res://scenes/world/World.gd" id="1_world"]
+[ext_resource type="Script" path="res://scripts/ai/HordeCoordinator.gd" id="2_horde"]
+[ext_resource type="Script" path="res://scenes/world/WorldTileMap.gd" id="7_tilemap"]
+[ext_resource type="PackedScene" path="res://scenes/hud/HUD.tscn" id="3_hud"]
+[ext_resource type="PackedScene" path="res://scenes/player/Player.tscn" id="4_player"]
+[ext_resource type="PackedScene" path="res://scenes/zombie/Zombie.tscn" id="5_zombie"]
+[ext_resource type="PackedScene" path="res://scenes/npc/NPC.tscn" id="6_npc"]
+
+[node name="World" type="Node2D"]
+script = ExtResource("1_world")
+
+[node name="TileMapLayer" type="Node2D" parent="."]
+script = ExtResource("7_tilemap")
+
+[node name="NavigationRegion2D" type="NavigationRegion2D" parent="."]
+
+[node name="HordeCoordinator" type="Node" parent="."]
+script = ExtResource("2_horde")
+
+[node name="SpawnPoints" type="Node2D" parent="."]
+
+[node name="SpawnPoint0" type="Marker2D" parent="SpawnPoints"]
+position = Vector2(0, 0)
+
+[node name="SpawnPoint1" type="Marker2D" parent="SpawnPoints"]
+position = Vector2(128, 0)
+
+[node name="SpawnPoint2" type="Marker2D" parent="SpawnPoints"]
+position = Vector2(0, 128)
+
+[node name="SpawnPoint3" type="Marker2D" parent="SpawnPoints"]
+position = Vector2(128, 128)
+
+[node name="Entities" type="Node2D" parent="."]
+y_sort_enabled = true
+
+[node name="DemoNPC" parent="Entities" instance=ExtResource("6_npc")]
+position = Vector2(200, 100)
+
+[node name="PlayerSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("Entities")
+spawn_limit = 4
+
+[node name="ZombieSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("Entities")
+spawn_limit = 100
+
+[node name="NPCSpawner" type="MultiplayerSpawner" parent="."]
+spawn_path = NodePath("Entities")
+spawn_limit = 20
+
+[node name="HUD" parent="." instance=ExtResource("3_hud")]

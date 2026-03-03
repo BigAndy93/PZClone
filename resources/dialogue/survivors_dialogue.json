@@ -1,0 +1,91 @@
+{
+  "survivors_neutral": {
+    "speaker": "Maya",
+    "lines": [
+      "Woah, easy there. You alone?",
+      "We don't get many strangers out here who aren't trying to eat us.",
+      "Name's Maya. We're holed up nearby. What do you want?"
+    ],
+    "choices": [
+      {
+        "text": "Just passing through.",
+        "action": "close",
+        "min_rep": -100
+      },
+      {
+        "text": "Looking to trade.",
+        "action": "open_trade",
+        "min_rep": -10
+      },
+      {
+        "text": "I'd like to help your group.",
+        "action": "offer_help",
+        "min_rep": -100
+      }
+    ]
+  },
+  "survivors_friendly": {
+    "speaker": "Maya",
+    "lines": [
+      "Good to see you're still alive.",
+      "Things have been rough lately. The horde to the east is getting bigger.",
+      "If you're heading that way, watch yourself."
+    ],
+    "choices": [
+      {
+        "text": "Got anything to trade?",
+        "action": "open_trade",
+        "min_rep": -10
+      },
+      {
+        "text": "Any quests?",
+        "action": "offer_quest",
+        "min_rep": 10
+      },
+      {
+        "text": "Stay safe.",
+        "action": "close",
+        "min_rep": -100
+      }
+    ]
+  },
+  "survivors_allied": {
+    "speaker": "Maya",
+    "lines": [
+      "You've done more for us than most. We owe you one.",
+      "Camp's yours anytime you need rest. Take whatever you need from the supply box.",
+      "Seriously — thank you."
+    ],
+    "choices": [
+      {
+        "text": "Trade supplies.",
+        "action": "open_trade",
+        "min_rep": -10
+      },
+      {
+        "text": "Any new missions?",
+        "action": "offer_quest",
+        "min_rep": 10
+      },
+      {
+        "text": "Just checking in.",
+        "action": "close",
+        "min_rep": -100
+      }
+    ]
+  },
+  "survivors_hostile": {
+    "speaker": "Maya",
+    "lines": [
+      "Get out of here before my people put you down.",
+      "You're not welcome."
+    ],
+    "choices": [
+      {
+        "text": "[Leave]",
+        "action": "close",
+        "min_rep": -100
+      }
+    ]
+  }
+}

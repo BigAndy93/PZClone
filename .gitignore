@@ -1,0 +1,15 @@
+# Godot 4 generated files
+.godot/
+
+# Import cache
+*.import
+
+# Godot export presets
+export_presets.cfg
+
+# Android export keystores
+*.keystore
+
+# OS generated
+.DS_Store
+Thumbs.db

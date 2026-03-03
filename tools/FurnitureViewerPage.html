@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PZClone — Furniture & Asset Viewer</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: #0d0d10; color: #ccc;
+    font-family: 'Consolas', 'Courier New', monospace;
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+  #toolbar {
+    background: #13131a; border-bottom: 1px solid #2a2a38;
+    padding: 6px 12px; display: flex; flex-wrap: wrap;
+    gap: 14px; align-items: center; flex-shrink: 0;
+  }
+  #toolbar h1 { font-size: 13px; color: #d0c080; margin-right: 8px; }
+  .ctrl { display: flex; align-items: center; gap: 6px; font-size: 11px; color: #aaa; }
+  .ctrl label { white-space: nowrap; }
+  input[type=range] { width: 80px; accent-color: #6080c0; }
+  input[type=checkbox] { accent-color: #6080c0; }
+  #tab-bar {
+    background: #0f0f16; border-bottom: 1px solid #2a2a38;
+    display: flex; flex-shrink: 0;
+  }
+  .tab {
+    padding: 6px 16px; font-size: 12px; cursor: pointer;
+    color: #777; border-bottom: 2px solid transparent;
+  }
+  .tab.active { color: #c8b870; border-bottom-color: #c8b870; }
+  #canvas-wrap {
+    flex: 1; overflow: auto; background: #0a0a0e; padding: 12px;
+  }
+  #main-canvas { display: block; }
+
+  /* ── Sheet panel ── */
+  #sheet-panel { flex: 1; overflow: auto; padding: 12px; display: none; }
+  #sheet-panel.visible { display: flex; flex-direction: column; gap: 8px; }
+  .sheet-controls {
+    display: flex; flex-wrap: wrap; gap: 10px;
+    font-size: 11px; color: #aaa;
+  }
+  .sheet-controls .ctrl { gap: 4px; }
+  #load-bar {
+    display: flex; align-items: center; gap: 10px; padding: 7px 10px;
+    background: #0f0f18; border: 1px solid #2a2a3a; border-radius: 4px;
+  }
+  #load-btn {
+    background: #2a3a5a; color: #90b0e0; border: 1px solid #3a5080;
+    padding: 4px 12px; font-size: 11px; cursor: pointer; border-radius: 3px;
+    font-family: inherit;
+  }
+  #load-btn:hover { background: #364870; }
+  #file-input { display: none; }
+  #file-status { font-size: 11px; color: #888; }
+  #sheet-hint {
+    font-size: 10px; color: #556; padding: 4px 0;
+  }
+  #sheet-canvas-wrap { overflow: auto; flex-shrink: 0; }
+  #sheet-canvas { display: block; cursor: crosshair; }
+  #gdscript-section {
+    background: #0a0a0e; border: 1px solid #2a2a3a; border-radius: 4px;
+    padding: 8px;
+  }
+  #gdscript-section h2 {
+    font-size: 11px; color: #8090a0; margin-bottom: 6px; font-weight: normal;
+  }
+  #gdscript-out {
+    width: 100%; font-family: 'Consolas', monospace; font-size: 11px;
+    background: #111318; color: #b0c8e0; border: 1px solid #1e2a3a;
+    padding: 8px; resize: vertical; min-height: 100px;
+  }
+  #copy-btn {
+    margin-top: 6px; background: #1e3a28; color: #70c080;
+    border: 1px solid #2a5038; padding: 3px 10px; font-size: 11px;
+    cursor: pointer; border-radius: 3px; font-family: inherit;
+  }
+  #copy-btn:hover { background: #264830; }
+  #copy-msg { font-size: 11px; color: #70c070; margin-left: 8px; display: none; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>Furniture &amp; Asset Viewer</h1>
+  <div class="ctrl">
+    <label>Scale</label>
+    <input type="range" id="scale" min="0.5" max="2.5" step="0.25" value="1.0">
+    <span id="scale-val">1.0×</span>
+  </div>
+  <div class="ctrl">
+    <label>Cols</label>
+    <input type="range" id="cols" min="2" max="8" step="1" value="5">
+    <span id="cols-val">5</span>
+  </div>
+  <div class="ctrl"><input type="checkbox" id="chk-shadow" checked><label for="chk-shadow">Shadow</label></div>
+  <div class="ctrl"><input type="checkbox" id="chk-floor" checked><label for="chk-floor">Floor</label></div>
+  <div class="ctrl"><input type="checkbox" id="chk-dims"><label for="chk-dims">Dimensions</label></div>
+  <div class="ctrl"><input type="checkbox" id="chk-labels" checked><label for="chk-labels">Labels</label></div>
+</div>
+
+<div id="tab-bar">
+  <div class="tab active" data-tab="furniture">Procedural Furniture</div>
+  <div class="tab" data-tab="sheet">Sprite Sheet</div>
+</div>
+
+<div id="canvas-wrap"><canvas id="main-canvas"></canvas></div>
+
+<div id="sheet-panel">
+
+  <!-- Load bar -->
+  <div id="load-bar">
+    <button id="load-btn" onclick="document.getElementById('file-input').click()">Open sprite sheet&hellip;</button>
+    <input type="file" id="file-input" accept="image/*">
+    <span id="file-status">No file loaded</span>
+  </div>
+
+  <!-- Sheet settings -->
+  <div class="sheet-controls">
+    <div class="ctrl">
+      <label>Const name</label>
+      <input type="text" id="const-name" value="COUNTER_PIVOTS"
+        style="width:160px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;font-size:11px;">
+    </div>
+    <div class="ctrl">
+      <label>Cell W</label>
+      <input type="number" id="cell-w" value="512" style="width:60px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <label>Cell H</label>
+      <input type="number" id="cell-h" value="512" style="width:60px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <label>Cols</label>
+      <input type="number" id="sheet-cols-n" value="2" style="width:40px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <label>Rows</label>
+      <input type="number" id="sheet-rows-n" value="2" style="width:40px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <label>Preview scale</label>
+      <input type="range" id="sheet-scale" min="0.05" max="0.5" step="0.01" value="0.18">
+      <span id="sheet-scale-val">0.18</span>
+    </div>
+    <div class="ctrl">
+      <label>Cell labels (comma-sep)</label>
+      <input type="text" id="cell-labels" value="South,East,North,West"
+        style="width:200px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;font-size:11px;">
+    </div>
+    <div class="ctrl">
+      <label>Default pivot X</label>
+      <input type="number" id="default-px" value="256" style="width:55px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <label>Default pivot Y</label>
+      <input type="number" id="default-py" value="420" style="width:55px;background:#1e1e2a;color:#ccc;border:1px solid #3a3a50;padding:2px;">
+    </div>
+    <div class="ctrl">
+      <button onclick="resetPivots()" style="background:#2a2a1a;color:#b0a060;border:1px solid #3a3a28;padding:3px 8px;font-size:11px;cursor:pointer;font-family:inherit;border-radius:3px;">
+        Reset all pivots
+      </button>
+    </div>
+  </div>
+
+  <div id="sheet-hint">
+    Click anywhere inside a cell to move that view's pivot crosshair.
+    Drag an existing crosshair to fine-tune. Each view has its own independent pivot.
+  </div>
+
+  <!-- Sheet canvas -->
+  <div id="sheet-canvas-wrap">
+    <canvas id="sheet-canvas"></canvas>
+  </div>
+
+  <!-- GDScript output -->
+  <div id="gdscript-section">
+    <h2>GDScript — paste the pivot array into ProceduralBuilding.gd</h2>
+    <textarea id="gdscript-out" readonly rows="7"></textarea>
+    <br>
+    <button id="copy-btn" onclick="copyGdscript()">Copy to clipboard</button>
+    <span id="copy-msg">Copied!</span>
+  </div>
+
+</div><!-- #sheet-panel -->
+
+<script>
+// ── Colour helpers ─────────────────────────────────────────────────────────────
+function c(r,g,b)      { return [r,g,b,1]; }
+function ca(r,g,b,a)   { return [r,g,b,a]; }
+function darkened(col,t){ return [col[0]*(1-t),col[1]*(1-t),col[2]*(1-t),col[3]]; }
+function lightened(col,t){ return [col[0]+(1-col[0])*t,col[1]+(1-col[1])*t,col[2]+(1-col[2])*t,col[3]]; }
+function css(col)       { return `rgba(${Math.round(col[0]*255)},${Math.round(col[1]*255)},${Math.round(col[2]*255)},${col[3]})`; }
+
+// ── Palette ────────────────────────────────────────────────────────────────────
+const FWD=c(0.46,0.34,0.20),FWS=c(0.58,0.46,0.28),FMT=c(0.64,0.60,0.54),FMS=c(0.52,0.48,0.42);
+const FSF=c(0.30,0.25,0.36),FSH=c(0.34,0.26,0.16),FFB=c(0.22,0.20,0.18),FCT=c(0.44,0.38,0.28);
+const FCS=c(0.32,0.26,0.18),FAP=c(0.26,0.28,0.30),FPL=c(0.44,0.40,0.30),FRG=c(0.38,0.22,0.14);
+
+const BOX_DEFS=[
+  ["Bed",0.22,0.30,5.0,FMT,FMS],["Nightstand",0.07,0.10,9.0,FWS,FWD],
+  ["Wardrobe",0.10,0.28,22.0,FWD,darkened(FWD,0.20)],["Dresser",0.08,0.20,14.0,FWS,FWD],
+  ["Sofa",0.10,0.22,9.0,FSF,darkened(FSF,0.25)],["Coffee Table",0.04,0.10,4.0,FWS,FWD],
+  ["Dining Table",0.14,0.18,8.0,FWS,FWD],["Chair",0.10,0.12,9.0,FWD,darkened(FWD,0.18)],
+  ["Shelf (low)",0.50,0.09,14.0,FSH,darkened(FSH,0.22)],["Shelf (tall)",0.50,0.09,18.0,FSH,darkened(FSH,0.22)],
+  ["Counter",0.10,0.55,10.0,FCT,FCS],["Back Wall",0.06,0.50,18.0,FFB,lightened(FFB,0.10)],
+  ["Kitchen Counter",0.10,0.65,10.0,lightened(FAP,0.08),FAP],["Stove",0.12,0.14,10.0,lightened(FAP,0.08),FAP],
+  ["Medicine Cabinet",0.06,0.12,12.0,c(0.84,0.88,0.84),c(0.68,0.74,0.68)],
+  ["Filing Cabinet",0.08,0.11,14.0,lightened(FFB,0.08),FFB],
+  ["Locker",0.07,0.10,20.0,c(0.26,0.30,0.26),c(0.20,0.24,0.20)],
+  ["Fridge",0.09,0.12,22.0,c(0.84,0.90,0.92),c(0.66,0.76,0.80)],
+  ["Pallet",0.18,0.18,10.0,FPL,darkened(FPL,0.22)],["Workbench",0.09,0.56,10.0,FWD,darkened(FWD,0.20)],
+  ["Tool Rack",0.30,0.06,16.0,lightened(FFB,0.10),FFB],["Barrel Cluster",0.09,0.10,12.0,FAP,darkened(FAP,0.20)],
+];
+const FLAT_DEFS=[
+  ["Rug (room)",0.35,0.45,ca(0.38,0.22,0.14,0.65)],["Rug (table)",0.13,0.16,ca(0.38,0.22,0.14,0.55)],
+  ["Car Pit",0.36,0.46,ca(0.10,0.10,0.10,0.50)],["Forklift Path",0.26,0.16,ca(0.08,0.08,0.08,0.35)],
+];
+
+const REF_NV={x:0,y:-64}, REF_EV={x:128,y:64};
+const CELL_W=210, CELL_H=175;
+
+// ── Procedural furniture renderer ──────────────────────────────────────────────
+const mainCanvas=document.getElementById('main-canvas');
+const ctx=mainCanvas.getContext('2d');
+
+function fillPoly(ctx,pts,col){
+  ctx.fillStyle=css(col); ctx.beginPath();
+  ctx.moveTo(pts[0].x,pts[0].y);
+  for(let i=1;i<pts.length;i++) ctx.lineTo(pts[i].x,pts[i].y);
+  ctx.closePath(); ctx.fill();
+}
+function drawBox(ctx,cx,cy,nv,ev,sn,se,h,topC,sideC,opts){
+  const dn={x:nv.x*sn,y:nv.y*sn},de={x:ev.x*se,y:ev.y*se};
+  const gN={x:cx+dn.x,y:cy+dn.y},gE={x:cx+de.x,y:cy+de.y};
+  const gS={x:cx-dn.x,y:cy-dn.y},gW={x:cx-de.x,y:cy-de.y};
+  if(opts.shadow){
+    const shRH=Math.hypot(de.x,de.y)*0.55,shRV=Math.hypot(dn.x,dn.y)*0.28;
+    ctx.fillStyle='rgba(10,15,26,0.22)'; ctx.beginPath();
+    for(let i=0;i<10;i++){const a=Math.PI*2*i/10;i===0?ctx.moveTo(cx+2+Math.cos(a)*shRH,cy+4+Math.sin(a)*shRV):ctx.lineTo(cx+2+Math.cos(a)*shRH,cy+4+Math.sin(a)*shRV);}
+    ctx.closePath(); ctx.fill();
+  }
+  if(opts.floor) fillPoly(ctx,[gN,gE,gS,gW],[topC[0],topC[1],topC[2],0.10]);
+  fillPoly(ctx,[gW,gS,{x:gS.x,y:gS.y-h},{x:gW.x,y:gW.y-h}],darkened(sideC,0.08));
+  fillPoly(ctx,[gE,gS,{x:gS.x,y:gS.y-h},{x:gE.x,y:gE.y-h}],darkened(sideC,0.28));
+  fillPoly(ctx,[{x:gN.x,y:gN.y-h},{x:gE.x,y:gE.y-h},{x:gS.x,y:gS.y-h},{x:gW.x,y:gW.y-h}],lightened(topC,0.12));
+  ctx.strokeStyle=css(lightened(topC,0.35)); ctx.lineWidth=1;
+  ctx.beginPath(); ctx.moveTo(gS.x,gS.y-h); ctx.lineTo(gW.x,gW.y-h); ctx.stroke();
+}
+
+function render(){
+  const sc=parseFloat(document.getElementById('scale').value);
+  const cols=parseInt(document.getElementById('cols').value);
+  const opts={shadow:document.getElementById('chk-shadow').checked,floor:document.getElementById('chk-floor').checked,
+    dims:document.getElementById('chk-dims').checked,labels:document.getElementById('chk-labels').checked};
+  const nv={x:REF_NV.x*sc,y:REF_NV.y*sc},ev={x:REF_EV.x*sc,y:REF_EV.y*sc};
+  const all=BOX_DEFS.length+FLAT_DEFS.length,rows=Math.ceil(all/cols);
+  const cw=CELL_W*sc,ch=CELL_H*sc;
+  mainCanvas.width=cols*cw; mainCanvas.height=rows*ch+20;
+  ctx.fillStyle='#121218'; ctx.fillRect(0,0,mainCanvas.width,mainCanvas.height);
+  ctx.fillStyle='#c8b060'; ctx.font='12px Consolas,monospace';
+  ctx.fillText(`Procedural Furniture  (${all} pieces, scale ${sc}×)`,6,14);
+  BOX_DEFS.forEach((def,idx)=>{
+    const ox=(idx%cols)*cw,oy=Math.floor(idx/cols)*ch,cx2=ox+cw*0.5,cy2=oy+ch*0.58;
+    ctx.strokeStyle='#2e2e3a'; ctx.lineWidth=1; ctx.strokeRect(ox+0.5,oy+0.5,cw-1,ch-1);
+    drawBox(ctx,cx2,cy2,nv,ev,def[1],def[2],def[3]*sc,def[4],def[5],opts);
+    if(opts.labels){ctx.fillStyle='#d8d8bc';ctx.font=`${Math.round(10*sc)}px Consolas,monospace`;ctx.fillText(def[0],ox+4,oy+ch-18);}
+    if(opts.dims){ctx.fillStyle='#7090c0';ctx.font='8px Consolas,monospace';ctx.fillText(`sn=${def[1].toFixed(2)} se=${def[2].toFixed(2)} h=${def[3]}`,ox+4,oy+ch-6);}
+  });
+  FLAT_DEFS.forEach((def,idx)=>{
+    const gidx=BOX_DEFS.length+idx,ox=(gidx%cols)*cw,oy=Math.floor(gidx/cols)*ch,cx2=ox+cw*0.5,cy2=oy+ch*0.58;
+    const dn={x:nv.x*def[1],y:nv.y*def[1]},de={x:ev.x*def[2],y:ev.y*def[2]};
+    ctx.strokeStyle='#2e2e3a';ctx.lineWidth=1;ctx.strokeRect(ox+0.5,oy+0.5,cw-1,ch-1);
+    fillPoly(ctx,[{x:cx2+dn.x,y:cy2+dn.y},{x:cx2+de.x,y:cy2+de.y},{x:cx2-dn.x,y:cy2-dn.y},{x:cx2-de.x,y:cy2-de.y}],def[3]);
+    if(opts.labels){ctx.fillStyle='#d8d8bc';ctx.font=`${Math.round(10*sc)}px Consolas,monospace`;ctx.fillText(def[0],ox+4,oy+ch-18);}
+  });
+}
+
+// ── Sprite sheet tab ───────────────────────────────────────────────────────────
+const sheetCanvas=document.getElementById('sheet-canvas');
+const sheetCtx=sheetCanvas.getContext('2d');
+let sheetImage=null;
+
+// Per-cell pivot positions in CELL-PIXEL coords (before preview scale).
+// Indexed as: flatIdx = row * sheetCols + col
+let cellPivots=[];
+let dragIdx=-1;
+const DRAG_RADIUS=14;  // canvas-pixel hit radius to grab crosshair
+
+function getVal(id){return parseFloat(document.getElementById(id).value)||0;}
+function getInt(id){return parseInt(document.getElementById(id).value)||1;}
+
+function getCellLayout(){
+  const sc=getVal('sheet-scale'), cw=getInt('cell-w')*sc, ch=getInt('cell-h')*sc;
+  const pad=8, hdrH=24;
+  return {sc,cw,ch,pad,hdrH,sCols:getInt('sheet-cols-n'),sRows:getInt('sheet-rows-n')};
+}
+
+function cellOriginCanvas(l,col,row){
+  return {x:l.pad+col*(l.cw+l.pad), y:l.hdrH+l.pad+row*(l.ch+l.pad)};
+}
+
+function ensurePivots(){
+  const n=getInt('sheet-cols-n')*getInt('sheet-rows-n');
+  const dpx=getVal('default-px'), dpy=getVal('default-py');
+  while(cellPivots.length<n) cellPivots.push({x:dpx,y:dpy});
+  cellPivots.length=n;
+}
+
+function resetPivots(){
+  cellPivots=[];
+  ensurePivots();
+  renderSheet(); updateGdscript();
+}
+
+function pivotCanvasPos(l,flatIdx){
+  const col=flatIdx%l.sCols, row=Math.floor(flatIdx/l.sCols);
+  const o=cellOriginCanvas(l,col,row);
+  const p=cellPivots[flatIdx]||{x:getVal('default-px'),y:getVal('default-py')};
+  return {x:o.x+p.x*l.sc, y:o.y+p.y*l.sc};
+}
+
+function renderSheet(){
+  ensurePivots();
+  const l=getCellLayout();
+  const labels=document.getElementById('cell-labels').value.split(',').map(s=>s.trim());
+  const n=l.sCols*l.sRows;
+  const totalW=l.pad+l.sCols*(l.cw+l.pad);
+  const totalH=l.hdrH+l.pad+l.sRows*(l.ch+l.pad);
+
+  sheetCanvas.width=totalW; sheetCanvas.height=totalH;
+  sheetCtx.fillStyle='#0a0a10'; sheetCtx.fillRect(0,0,totalW,totalH);
+
+  sheetCtx.font='11px Consolas,monospace';
+  if(sheetImage){
+    sheetCtx.fillStyle='#70c070';
+    sheetCtx.fillText(`Loaded: ${sheetImage.width}×${sheetImage.height}px  |  cell ${getInt('cell-w')}×${getInt('cell-h')}  |  ${l.sCols}×${l.sRows} grid`,6,16);
+  } else {
+    sheetCtx.fillStyle='#c07040';
+    sheetCtx.fillText('No sprite sheet — click "Open sprite sheet…" above or paste with Ctrl+V',6,16);
+  }
+
+  for(let row=0;row<l.sRows;row++){
+    for(let col=0;col<l.sCols;col++){
+      const fi=row*l.sCols+col;
+      const o=cellOriginCanvas(l,col,row);
+      if(sheetImage){
+        sheetCtx.drawImage(sheetImage,col*getInt('cell-w'),row*getInt('cell-h'),getInt('cell-w'),getInt('cell-h'),o.x,o.y,l.cw,l.ch);
+      } else {
+        sheetCtx.fillStyle='#141420'; sheetCtx.fillRect(o.x,o.y,l.cw,l.ch);
+        sheetCtx.strokeStyle='#1e1e2a'; sheetCtx.lineWidth=1;
+        sheetCtx.beginPath(); sheetCtx.moveTo(o.x,o.y); sheetCtx.lineTo(o.x+l.cw,o.y+l.ch);
+        sheetCtx.moveTo(o.x+l.cw,o.y); sheetCtx.lineTo(o.x,o.y+l.ch); sheetCtx.stroke();
+      }
+      // Cell border
+      const isActive=(fi===dragIdx);
+      sheetCtx.strokeStyle=isActive?'#a0a0ff':'#5050a0';
+      sheetCtx.lineWidth=isActive?2:1;
+      sheetCtx.strokeRect(o.x+0.5,o.y+0.5,l.cw-1,l.ch-1);
+
+      // Pivot crosshair for this cell
+      const pv=cellPivots[fi]||{x:0,y:0};
+      const px=o.x+pv.x*l.sc, py=o.y+pv.y*l.sc;
+      const arm=8;
+      sheetCtx.strokeStyle='rgba(255,50,50,0.95)'; sheetCtx.lineWidth=1.5;
+      sheetCtx.beginPath();
+      sheetCtx.moveTo(px-arm,py); sheetCtx.lineTo(px+arm,py);
+      sheetCtx.moveTo(px,py-arm); sheetCtx.lineTo(px,py+arm);
+      sheetCtx.stroke();
+      sheetCtx.fillStyle='rgba(255,50,50,0.95)';
+      sheetCtx.beginPath(); sheetCtx.arc(px,py,2.5,0,Math.PI*2); sheetCtx.fill();
+
+      // Coord label on crosshair
+      sheetCtx.fillStyle='rgba(255,180,100,0.90)'; sheetCtx.font='9px Consolas,monospace';
+      sheetCtx.fillText(`(${Math.round(pv.x)}, ${Math.round(pv.y)})`,px+6,py-4);
+
+      // Cell label (bottom left)
+      const lbl=labels[fi]??`col=${col} row=${row}`;
+      sheetCtx.fillStyle='rgba(255,255,130,0.90)'; sheetCtx.font='10px Consolas,monospace';
+      sheetCtx.fillText(lbl,o.x+4,o.y+l.ch-5);
+    }
+  }
+}
+
+function updateGdscript(){
+  ensurePivots();
+  const labels=document.getElementById('cell-labels').value.split(',').map(s=>s.trim());
+  const n=getInt('sheet-cols-n')*getInt('sheet-rows-n');
+  const constName=document.getElementById('const-name').value.trim()||'PIVOTS';
+  let lines=[];
+  lines.push('# Per-view pivot — pixel in the cell where the floor-contact point sits.');
+  lines.push('# Index = view.y * sheet_cols + view.x  (matches 2×2 sheet grid).');
+  lines.push(`const ${constName}: Array = [`);
+  for(let i=0;i<n;i++){
+    const p=cellPivots[i]||{x:0,y:0};
+    const lbl=labels[i]??`cell ${i}`;
+    lines.push(`\tVector2(${p.x.toFixed(1)}, ${p.y.toFixed(1)}),  # ${lbl}`);
+  }
+  lines.push(']');
+  document.getElementById('gdscript-out').value=lines.join('\n');
+}
+
+function copyGdscript(){
+  navigator.clipboard.writeText(document.getElementById('gdscript-out').value).then(()=>{
+    const msg=document.getElementById('copy-msg');
+    msg.style.display='inline'; setTimeout(()=>{msg.style.display='none';},2000);
+  });
+}
+
+// ── Mouse interaction on sheet canvas ─────────────────────────────────────────
+function canvasMousePos(e){
+  const r=sheetCanvas.getBoundingClientRect();
+  return {x:(e.clientX-r.left)*(sheetCanvas.width/r.width),
+          y:(e.clientY-r.top)*(sheetCanvas.height/r.height)};
+}
+
+function findCellAt(l,mx,my){
+  for(let row=0;row<l.sRows;row++){
+    for(let col=0;col<l.sCols;col++){
+      const o=cellOriginCanvas(l,col,row);
+      if(mx>=o.x&&mx<=o.x+l.cw&&my>=o.y&&my<=o.y+l.ch)
+        return {idx:row*l.sCols+col,ox:o.x,oy:o.y};
+    }
+  }
+  return null;
+}
+
+sheetCanvas.addEventListener('mousedown',e=>{
+  ensurePivots();
+  const l=getCellLayout(), m=canvasMousePos(e);
+  // Check if near an existing crosshair
+  let bestIdx=-1,bestD=DRAG_RADIUS;
+  for(let i=0;i<cellPivots.length;i++){
+    const pp=pivotCanvasPos(l,i);
+    const d=Math.hypot(m.x-pp.x,m.y-pp.y);
+    if(d<bestD){bestD=d;bestIdx=i;}
+  }
+  if(bestIdx>=0){
+    dragIdx=bestIdx; e.preventDefault(); return;
+  }
+  // Click in a cell → move that cell's pivot
+  const cell=findCellAt(l,m.x,m.y);
+  if(cell){
+    cellPivots[cell.idx]={x:(m.x-cell.ox)/l.sc, y:(m.y-cell.oy)/l.sc};
+    renderSheet(); updateGdscript(); e.preventDefault();
+  }
+});
+
+sheetCanvas.addEventListener('mousemove',e=>{
+  if(dragIdx<0) return;
+  const l=getCellLayout(), m=canvasMousePos(e);
+  const col=dragIdx%l.sCols, row=Math.floor(dragIdx/l.sCols);
+  const o=cellOriginCanvas(l,col,row);
+  cellPivots[dragIdx]={
+    x:Math.max(0,Math.min(getInt('cell-w'),(m.x-o.x)/l.sc)),
+    y:Math.max(0,Math.min(getInt('cell-h'),(m.y-o.y)/l.sc))
+  };
+  renderSheet(); updateGdscript();
+});
+
+sheetCanvas.addEventListener('mouseup',()=>{dragIdx=-1;});
+sheetCanvas.addEventListener('mouseleave',()=>{dragIdx=-1;});
+
+// ── File loading ───────────────────────────────────────────────────────────────
+function loadImageFile(file){
+  if(!file||!file.type.startsWith('image/')) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const img=new Image();
+    img.onload=()=>{
+      sheetImage=img;
+      document.getElementById('file-status').textContent=`${file.name}  (${img.width}×${img.height}px)`;
+      document.getElementById('file-status').style.color='#70c070';
+      // Auto-fill cell dimensions if they look like a clean divisor
+      const cols=getInt('sheet-cols-n'), rows=getInt('sheet-rows-n');
+      if(img.width%cols===0) document.getElementById('cell-w').value=img.width/cols;
+      if(img.height%rows===0) document.getElementById('cell-h').value=img.height/rows;
+      renderSheet(); updateGdscript();
+    };
+    img.src=e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+document.getElementById('file-input').addEventListener('change',e=>{loadImageFile(e.target.files[0]);});
+
+document.addEventListener('paste',e=>{
+  const item=[...(e.clipboardData?.items??[])].find(i=>i.type.startsWith('image/'));
+  if(item){const f=item.getAsFile(); loadImageFile(Object.assign(f,{name:'pasted.png'}));}
+});
+
+// ── Control wiring ─────────────────────────────────────────────────────────────
+['scale','cols','chk-shadow','chk-floor','chk-dims','chk-labels'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>{
+    document.getElementById('scale-val').textContent=document.getElementById('scale').value+'×';
+    document.getElementById('cols-val').textContent=document.getElementById('cols').value;
+    render();
+  });
+});
+
+['const-name'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>{updateGdscript();});
+});
+['cell-w','cell-h','sheet-cols-n','sheet-rows-n','sheet-scale','cell-labels'].forEach(id=>{
+  document.getElementById(id).addEventListener('input',()=>{
+    document.getElementById('sheet-scale-val').textContent=
+      parseFloat(document.getElementById('sheet-scale').value).toFixed(2);
+    cellPivots=[];  // Reset pivots when grid dimensions change
+    renderSheet(); updateGdscript();
+  });
+});
+
+['default-px','default-py'].forEach(id=>{
+  document.getElementById(id).addEventListener('change',()=>{renderSheet(); updateGdscript();});
+});
+
+document.querySelectorAll('.tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    tab.classList.add('active');
+    const which=tab.dataset.tab;
+    document.getElementById('canvas-wrap').style.display=which==='furniture'?'':'none';
+    const sp=document.getElementById('sheet-panel');
+    sp.classList.toggle('visible',which==='sheet');
+    if(which==='sheet'){renderSheet();updateGdscript();}
+  });
+});
+
+// Initial render
+render();
+</script>
+</body>
+</html>

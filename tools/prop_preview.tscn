@@ -1,0 +1,8 @@
+[gd_scene format=3 uid="uid://cn5107wqfed44"]
+
+[ext_resource type="Script" uid="uid://b3ukm6ekuc6y8" path="res://tools/PropPreview.gd" id="1_4wodw"]
+
+[node name="PropPreview" type="Node2D" unique_id=330491538]
+position = Vector2(-48.148438, -9.578125)
+script = ExtResource("1_4wodw")
+metadata/_custom_type_script = "uid://b3ukm6ekuc6y8"

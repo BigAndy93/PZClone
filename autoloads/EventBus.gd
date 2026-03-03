@@ -1,0 +1,16 @@
+extends Node
+
+signal zombie_alerted(zombie: Node, alerter_position: Vector2)
+signal player_stat_critical(peer_id: int, stat_name: String)
+signal npc_killed(npc: Node, killer_peer_id: int)
+signal trade_completed(peer_id: int, faction_id: String)
+signal reputation_event(faction_id: String, peer_id: int, event_key: String, delta: float)
+signal player_spawned(peer_id: int, player_node: Node)
+signal player_removed(peer_id: int)
+signal player_respawn_pending(peer_id: int, delay: float)
+signal player_downed(peer_id: int)
+signal player_revived(peer_id: int)
+signal zombie_spawned(zombie_node: Node)
+signal zombie_killed(zombie_node: Node, killer_peer_id: int)
+signal item_picked_up(peer_id: int, item_data: ItemData)
+signal item_used(peer_id: int, message: String)

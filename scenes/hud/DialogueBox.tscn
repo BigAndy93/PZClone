@@ -1,0 +1,23 @@
+[gd_scene load_steps=1 format=3 uid="uid://dialoguebox_scene"]
+
+[node name="DialogueBox" type="PanelContainer"]
+anchors_preset = 7
+anchor_left = 0.0
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -200.0
+grow_vertical = 0
+
+[node name="VBox" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="SpeakerLabel" type="Label" parent="VBox"]
+text = "Speaker"
+theme_override_font_sizes/font_size = 16
+
+[node name="LineLabel" type="Label" parent="VBox"]
+text = "..."
+autowrap_mode = 3
+
+[node name="ChoicesBox" type="VBoxContainer" parent="VBox"]

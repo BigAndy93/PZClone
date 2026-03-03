@@ -1,0 +1,32 @@
+[gd_scene load_steps=4 format=3 uid="uid://npc_scene"]
+
+[ext_resource type="Script" path="res://scenes/npc/NPC.gd" id="1_npc"]
+
+[sub_resource type="CapsuleShape2D" id="CapsuleShape2D_1"]
+radius = 5.0
+height = 16.0
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_1"]
+radius = 80.0
+
+[node name="NPC" type="CharacterBody2D"]
+script = ExtResource("1_npc")
+collision_layer = 4
+collision_mask = 8
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="."]
+shape = SubResource("CapsuleShape2D_1")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="."]
+y_sort_origin = -16
+
+[node name="InteractLabel" type="Label" parent="."]
+position = Vector2(-30, -50)
+text = "[F] Talk"
+
+[node name="DialogueTriggerArea" type="Area2D" parent="."]
+collision_layer = 0
+collision_mask = 1
+
+[node name="DialogueTriggerShape" type="CollisionShape2D" parent="DialogueTriggerArea"]
+shape = SubResource("CircleShape2D_1")
