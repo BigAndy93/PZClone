@@ -248,13 +248,7 @@ func _bake_wall_into(target: Node2D, base_col: Color, h_tiles: int, nw_face: boo
 	var depth := Vector2(-WALL_T, WALL_T * 0.4) if not nw_face \
 			else Vector2(WALL_T, WALL_T * 0.4)
 
-	# ── 1. End cap at pt_a (the outward-facing side at the N-vertex end) ──────
-	# Extends outside the front face boundary, visible when the wall end is exposed.
-	# At connected corners the adjacent wall sprite (higher z_index) covers it.
-	var side_col := base_col.darkened(0.28)
-	target.add_child(_make_poly([a, a + up, a + up + depth, a + depth], side_col))
-
-	# ── 2. Front face — three lightness bands (dark bottom → lighter top) ─────
+	# ── 1. Front face — three lightness bands (dark bottom → lighter top) ─────
 	var third   := up / 3.0
 	var c1      := Color(base_col.r, base_col.g, base_col.b, 1.0)
 	var c2      := c1.lightened(0.10)
@@ -263,12 +257,14 @@ func _bake_wall_into(target: Node2D, base_col: Color, h_tiles: int, nw_face: boo
 	target.add_child(_make_poly([a + third,   b + third,   b + third*2.0, a + third*2.0], c2))
 	target.add_child(_make_poly([a+third*2.0, b+third*2.0, b + up,        a + up       ], c3))
 
-	# ── 3. Top face — horizontal slab, lightest value, drawn over front face ──
+	# ── 2. Top face — horizontal slab, lightest value, drawn over front face ──
 	var top_col := base_col.lightened(0.45)
 	target.add_child(_make_poly([a + up, b + up, b + up + depth, a + up + depth], top_col))
 
-	# ── 4. Outlines ───────────────────────────────────────────────────────────
-	_add_outline(target, [a + up, b + up, b, a],                            OUTLINE_COLOR, 1.0)
+	# ── 3. Outlines — omit the left edge (a→a+up) to avoid inter-tile seams ──
+	_add_line(target, a,      b,      OUTLINE_COLOR, 1.0)   # bottom edge
+	_add_line(target, b,      b + up, OUTLINE_COLOR, 1.0)   # right edge
+	_add_line(target, b + up, a + up, OUTLINE_COLOR, 1.0)   # top edge
 	_add_outline(target, [a + up, b + up, b + up + depth, a + up + depth],  OUTLINE_COLOR, 0.8)
 
 
