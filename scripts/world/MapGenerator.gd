@@ -35,17 +35,41 @@ static func _furn_fp(furn_type: int) -> Vector2i:
 		MapData.FURN_COUNTER: return Vector2i(1, 0)
 	return Vector2i.ZERO
 
-## Returns true if the furniture type has a rot=1 baked texture.
+## Returns true if the furniture type has a rot=1 baked variant.
+## (Sprite-sheet types are excluded here; they use _supports_all_rots instead.)
 static func _supports_rot1(furn_type: int) -> bool:
 	return furn_type in [
-		MapData.FURN_SOFA, MapData.FURN_SHELF, MapData.FURN_COUNTER,
-		MapData.FURN_LOCKER, MapData.FURN_FRIDGE, MapData.FURN_DRESSER,
+		MapData.FURN_SOFA,   MapData.FURN_SHELF,   MapData.FURN_COUNTER,
+		MapData.FURN_LOCKER, MapData.FURN_FRIDGE,  MapData.FURN_DRESSER,
 		MapData.FURN_BATHTUB, MapData.FURN_DESK,
 	]
 
-## Maps wall direction + furniture type to a visual rotation (0 or 1).
+## Returns true for sprite-sheet furniture types that supply all 4 rotations
+## using the NE / SE / SW / NW standard (rot 0-3).
+static func _supports_all_rots(furn_type: int) -> bool:
+	return furn_type in [
+		MapData.FURN_COUCH,
+	]
+
+## Maps a wall direction to the correct visual rotation for a furniture type.
+##
+## Standard rotation semantics (mirrors sprite-sheet layout convention):
+##   rot=0  NE-facing  — N-wall placement
+##   rot=1  SE-facing  — E-wall placement
+##   rot=2  SW-facing  — S-wall placement
+##   rot=3  NW-facing  — W-wall placement
+##
+## Procedural furniture (baked) only has rot=0 and rot=1.
+## Sprite-sheet furniture uses all four.
 static func _wall_rot(wall_dir: int, furn_type: int) -> int:
-	if (wall_dir == MapData.DIR_W or wall_dir == MapData.DIR_E) and _supports_rot1(furn_type):
+	if _supports_all_rots(furn_type):
+		match wall_dir:
+			MapData.DIR_N: return 0   # NE-facing
+			MapData.DIR_E: return 1   # SE-facing
+			MapData.DIR_S: return 2   # SW-facing
+			MapData.DIR_W: return 3   # NW-facing
+	# Procedural furniture: rot=1 only for E/W walls if supported.
+	if (wall_dir == MapData.DIR_E or wall_dir == MapData.DIR_W) and _supports_rot1(furn_type):
 		return 1
 	return 0
 
@@ -578,7 +602,7 @@ static func _place_furniture(data: MapData, bp: BuildingBlueprint) -> void:
 				_wall(data, room, MapData.FURN_LOCKER,     dz, [MapData.DIR_E, MapData.DIR_S, MapData.DIR_W, MapData.DIR_N])
 
 			BuildingBlueprint.RoomDef.Purpose.LIVING:
-				_wall(data, room, MapData.FURN_SOFA,  dz, [MapData.DIR_S, MapData.DIR_E, MapData.DIR_W, MapData.DIR_N])
+				_wall(data, room, MapData.FURN_COUCH, dz, [MapData.DIR_S, MapData.DIR_E, MapData.DIR_W, MapData.DIR_N])
 				_free(data, room, MapData.FURN_TABLE, dz)
 				_free(data, room, MapData.FURN_CHAIR, dz)
 
@@ -687,7 +711,13 @@ static func _wall(data: MapData, room: BuildingBlueprint.RoomDef,
 static func _free(data: MapData, room: BuildingBlueprint.RoomDef,
 		furn_type: int, dz: Dictionary) -> bool:
 	# Determine which rotations are available for this type.
-	var rots: Array = [0, 1] if _supports_rot1(furn_type) else [0]
+	var rots: Array
+	if _supports_all_rots(furn_type):
+		rots = [0, 1, 2, 3]
+	elif _supports_rot1(furn_type):
+		rots = [0, 1]
+	else:
+		rots = [0]
 	var fp := _furn_fp(furn_type)
 	var inner: Array = []
 	var any_open: Array = []

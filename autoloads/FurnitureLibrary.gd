@@ -135,6 +135,55 @@ static func spec_for_furn(furn_type: int, rot: int = 0) -> Dictionary:
 	return {}
 
 
+## Returns sprite-sheet furniture specs keyed by MapData.FURN_* type.
+##
+## SPRITE SHEET ROTATION STANDARD (all future sheets must follow this layout):
+##
+##   rot=0  NE-facing  → top-left  frame (col 0, row 0)
+##   rot=1  SE-facing  → top-right frame (col 1, row 0)
+##   rot=2  SW-facing  → bot-left  frame (col 0, row 1)
+##   rot=3  NW-facing  → bot-right frame (col 1, row 1)
+##
+##   Placement mapping: N-wall → rot=0, E-wall → rot=1, S-wall → rot=2, W-wall → rot=3.
+##
+## Per-entry keys:
+##   path        : String   — resource path to the PNG sprite sheet
+##   frame_cols  : int      — columns in the sheet grid
+##   frame_rows  : int      — rows in the sheet grid
+##   rot_frames  : Dict     — rot (0-3) → Vector2i(col, row) in the sheet
+##   anchor_frac : Vector2  — floor-contact point as fraction of frame size
+##   scale       : float    — uniform display scale to fit game tiles
+static func get_sprite_sheet_specs() -> Dictionary:
+	return {
+		MapData.FURN_COUCH: {
+			"path":       "res://assets/furniture/couch_sheet.png",
+			"frame_cols": 2,
+			"frame_rows": 2,
+			# Standard NE/SE/SW/NW layout:
+			"rot_frames": {
+				0: Vector2i(0, 0),   # NE-facing (N-wall placement)
+				1: Vector2i(1, 0),   # SE-facing (E-wall placement)
+				2: Vector2i(0, 1),   # SW-facing (S-wall placement)
+				3: Vector2i(1, 1),   # NW-facing (W-wall placement)
+			},
+			# Pixel in each frame that aligns with the tile's isometric floor center.
+			# (0.5 = horizontally centered, 0.82 = ~82% down the frame height)
+			"anchor_frac": Vector2(0.50, 0.82),
+			# Scale to match game tile size. Increase/decrease to resize the sprite.
+			"scale": 0.20,
+		},
+	}
+
+
+## Cached sheet textures — loaded once per path, reused across all buildings.
+static var _sheet_tex_cache: Dictionary = {}
+
+static func load_sheet_texture(path: String) -> Texture2D:
+	if not _sheet_tex_cache.has(path):
+		_sheet_tex_cache[path] = load(path)
+	return _sheet_tex_cache[path]
+
+
 static func get_flat_specs() -> Array:
 	var FRG := Color(0.38, 0.22, 0.14)   # rug
 	return [

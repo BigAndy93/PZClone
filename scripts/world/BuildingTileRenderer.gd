@@ -20,7 +20,7 @@ const UNEXPLORED_ALPHA : float = 0.0   # target alpha for rooms not yet entered
 # Tall furniture types that receive extra fade when inside (System 6)
 const TALL_FURN := [
 	MapData.FURN_SHELF, MapData.FURN_LOCKER, MapData.FURN_COUNTER,
-	MapData.FURN_FRIDGE
+	MapData.FURN_FRIDGE, MapData.FURN_COUCH,
 ]
 
 
@@ -387,13 +387,45 @@ func _spawn_floor_sprites() -> void:
 
 
 func _spawn_furn_sprites() -> void:
-	var b := _bp.bounds
+	var b           := _bp.bounds
+	var sheet_specs := FurnitureLibrary.get_sprite_sheet_specs()
 	for ty in range(b.position.y, b.end.y):
 		for tx in range(b.position.x, b.end.x):
 			var furn: int = _data.get_furniture(tx, ty)
 			if furn == MapData.FURN_NONE:
 				continue
-			var rot: int        = _data.get_furn_rot(tx, ty)
+			var rot:     int      = _data.get_furn_rot(tx, ty)
+			var local_c: Vector2  = _cell_local(tx, ty)
+			var rid:     int      = tile_to_room.get(Vector2i(tx, ty), -1)
+			var is_tall: bool     = furn in TALL_FURN
+
+			# ── Sprite-sheet furniture (e.g. FURN_COUCH) ─────────────────────
+			if sheet_specs.has(furn):
+				var sd: Dictionary = sheet_specs[furn]
+				var tex: Texture2D = FurnitureLibrary.load_sheet_texture(sd["path"])
+				if tex == null:
+					continue
+				var fw:    int     = tex.get_width()  / sd["frame_cols"]
+				var fh:    int     = tex.get_height() / sd["frame_rows"]
+				var rf: Vector2i   = sd["rot_frames"].get(rot, Vector2i(0, 0))
+				var atlas          := AtlasTexture.new()
+				atlas.atlas         = tex
+				atlas.region        = Rect2(rf.x * fw, rf.y * fh, fw, fh)
+				var sc:    float   = sd["scale"]
+				var af:    Vector2 = sd["anchor_frac"]
+				var spr            := Sprite2D.new()
+				spr.texture         = atlas
+				spr.centered        = false
+				spr.texture_filter  = CanvasItem.TEXTURE_FILTER_NEAREST
+				spr.position        = local_c + Vector2(-af.x * fw, -af.y * fh) * sc
+				spr.scale           = Vector2(sc, sc)
+				spr.z_index         = (tx + ty) * 2
+				spr.visible         = false
+				_furn_sprites.append({"sprite": spr, "rid": rid, "is_tall": is_tall, "tile": Vector2i(tx, ty)})
+				add_child(spr)
+				continue
+
+			# ── Procedurally baked furniture ──────────────────────────────────
 			var spec: Dictionary = FurnitureLibrary.spec_for_furn(furn, rot)
 			if spec.is_empty():
 				continue
@@ -422,13 +454,9 @@ func _spawn_furn_sprites() -> void:
 					nv = FurnitureBaker.BAKE_NV * spec["sn"]
 					ev = FurnitureBaker.BAKE_EV * spec["se"]
 
-			var local_c := _cell_local(tx, ty)
 			var spr     := FurnitureBaker.make_sprite(key, nv, ev, local_c, rot)
 			spr.z_index  = (tx + ty) * 2
 			spr.visible  = false
-
-			var rid: int      = tile_to_room.get(Vector2i(tx, ty), -1)
-			var is_tall: bool = furn in TALL_FURN
 
 			_furn_sprites.append({
 				"sprite":  spr,
