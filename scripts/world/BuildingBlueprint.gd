@@ -28,13 +28,17 @@ class RoomDef:
 	}
 	var id:          int
 	var purpose:     int = Purpose.LIVING
+	var floor_index: int = 0
 	var bounds:      Rect2i                # tile rect of this room
 	var floor_cells: Array = []            # Array[Vector2i] — interior tiles only
+	var connected_door_edges: Array = []   # Array[Vector3i]
+	var connected_window_edges: Array = [] # Array[Vector3i]
 
-	static func make(p_id: int, p_purpose: int, p_bounds: Rect2i) -> RoomDef:
+	static func make(p_id: int, p_purpose: int, p_bounds: Rect2i, p_floor_index: int = 0) -> RoomDef:
 		var r        := RoomDef.new()
 		r.id          = p_id
 		r.purpose     = p_purpose
+		r.floor_index = p_floor_index
 		r.bounds      = p_bounds
 		return r
 
