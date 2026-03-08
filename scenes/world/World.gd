@@ -66,7 +66,7 @@ func _ready() -> void:
 
 	# Pre-bake all building component sprites (wall/floor/door/window) and furniture
 	# textures before map generation so BuildingTileRenderer.setup() can use them.
-	await BuildingComponentBaker.warm(3)
+	await BuildingComponentBaker.warm(4)   # height_tiles can be 3 OR 4 (large buildings)
 	await FurnitureBaker.warm_batch(
 		FurnitureLibrary.get_box_specs(),
 		FurnitureLibrary.get_flat_specs())

@@ -17,6 +17,13 @@ extends Node2D
 const WALL_H_PER_TILE  : float = 32.0
 const UNEXPLORED_ALPHA : float = 0.0   # target alpha for rooms not yet entered
 
+# Baseboard strip drawn at the base of every wall face.
+# Stays partially visible when the wall above is cut away (occlusion hint).
+const BASEBOARD_H         : float = 3.0    # screen-pixel height of the strip
+const BASEBOARD_MIN_ALPHA : float = 0.35   # alpha floor when wall is fully faded
+const BASEBOARD_NE_COL    := Color(0.22, 0.20, 0.17, 1.0)   # dark  (NE shadow face)
+const BASEBOARD_NW_COL    := Color(0.38, 0.35, 0.28, 1.0)   # light (NW lit face)
+
 # Tall furniture types that receive extra fade when inside (System 6)
 const TALL_FURN := [
 	MapData.FURN_SHELF, MapData.FURN_LOCKER, MapData.FURN_COUNTER,
@@ -50,11 +57,13 @@ const LERP_THRESH: float = 0.005
 
 # ── Sprite collections ───────────────────────────────────────────────────────────
 # Wall entry: {sprite, rid_a, rid_b, is_front, edge_key, is_window}
-var _wall_sprites:  Array = []
+var _wall_sprites:      Array = []
+# Baseboard entry: {poly, rid_a, rid_b, is_front, nw_face, tile_x, tile_y}
+var _baseboard_sprites: Array = []
 # Furn entry: {sprite, rid, is_tall}
-var _furn_sprites:  Array = []
+var _furn_sprites:      Array = []
 # Floor entry: {sprite, rid}
-var _floor_sprites: Array = []
+var _floor_sprites:     Array = []
 
 
 func _ready() -> void:
@@ -98,6 +107,8 @@ func set_visibility_data(player_room_id: int, adjacent_ids: Array, inside: bool,
 	if delta != Vector2.ZERO:
 		for entry in _wall_sprites:
 			entry["sprite"].position += delta
+		for entry in _baseboard_sprites:
+			entry["poly"].position += delta
 		for entry in _floor_sprites:
 			entry["sprite"].position += delta
 		for entry in _furn_sprites:
@@ -195,6 +206,10 @@ func _apply_sprite_alphas() -> void:
 		var alpha: float = _wall_alpha_from_entry(entry, b)
 		entry["sprite"].modulate.a = alpha
 
+	# Baseboard strips — follow wall alpha but stay visible at BASEBOARD_MIN_ALPHA
+	for entry in _baseboard_sprites:
+		entry["poly"].modulate.a = _baseboard_alpha_from_entry(entry, b)
+
 	# Floor sprites — alpha driven by room exploration state.
 	for entry in _floor_sprites:
 		var spr: Sprite2D = entry["sprite"]
@@ -251,6 +266,20 @@ func _wall_alpha_from_entry(entry: Dictionary, _b: Rect2i) -> float:
 	var ab: float = _current_room_alphas.get(entry["rid_b"], 1.0) \
 					if entry["rid_b"] >= 0 else 1.0
 	return maxf(aa, ab)
+
+
+## Baseboard alpha: same as the wall, but clamped to BASEBOARD_MIN_ALPHA when the
+## wall is faded (cut-away) so a thin hint strip remains visible.
+## Respects room exploration: if neither adjacent room is explored the strip is hidden.
+func _baseboard_alpha_from_entry(entry: Dictionary, b: Rect2i) -> float:
+	var aa: float = _current_room_alphas.get(entry["rid_a"], 1.0) \
+					if entry["rid_a"] >= 0 else 1.0
+	var ab: float = _current_room_alphas.get(entry["rid_b"], 1.0) \
+					if entry["rid_b"] >= 0 else 1.0
+	var room_alpha := maxf(aa, ab)
+	# If the room(s) are unexplored the baseboard is fully hidden.
+	# Otherwise take the larger of: the normal wall alpha, or the minimum hint alpha.
+	return maxf(_wall_alpha_from_entry(entry, b), room_alpha * BASEBOARD_MIN_ALPHA)
 
 
 # ── Room lookup (used by World.gd externally via tile_to_room) ───────────────────
@@ -366,6 +395,33 @@ func _add_wall_sprite(key: String, local_c: Vector2, flip_h: bool,
 		"is_front": is_front,
 		"edge_key": ek,
 		"is_window": is_win,
+		"nw_face":  nw_face,
+		"tile_x":   tx,
+		"tile_y":   ty,
+	})
+
+	# Baseboard strip — thin isometric parallelogram at the floor edge of this wall face.
+	# NE face (nw_face=false): base runs from pt_n=(0,-16) → pt_e=(+32,0) relative to local_c.
+	# NW face (nw_face=true):  base runs from pt_n=(0,-16) → pt_w=(-32,0) relative to local_c.
+	var board_a  := Vector2(0.0, -16.0)
+	var board_b  := Vector2(-32.0, 0.0) if nw_face else Vector2(32.0, 0.0)
+	var board_col: Color = BASEBOARD_NW_COL if nw_face else BASEBOARD_NE_COL
+	var board            := Polygon2D.new()
+	board.polygon         = PackedVector2Array([
+		board_a,
+		board_b,
+		board_b + Vector2(0.0, -BASEBOARD_H),
+		board_a + Vector2(0.0, -BASEBOARD_H),
+	])
+	board.color           = board_col
+	board.position        = local_c
+	board.z_index         = (tx + ty) * 2 - 1
+	add_child(board)
+	_baseboard_sprites.append({
+		"poly":     board,
+		"rid_a":    rid_a,
+		"rid_b":    rid_b,
+		"is_front": is_front,
 		"nw_face":  nw_face,
 		"tile_x":   tx,
 		"tile_y":   ty,

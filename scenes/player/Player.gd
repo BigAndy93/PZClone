@@ -822,9 +822,11 @@ func server_clear_drag_state() -> void:
 	rpc_notify_drag_state.rpc_id(peer_id, 0)
 
 
-# ── Aim (RMB held) ────────────────────────────────────────────────────────────
+# ── Aim (RMB held OR Ctrl held) ──────────────────────────────────────────────
 func _handle_aim() -> void:
-	is_aiming = Input.is_action_pressed("aim") \
+	var aim_input: bool = Input.is_action_pressed("aim") \
+		or Input.is_key_pressed(KEY_CTRL)
+	is_aiming = aim_input \
 		and (_interact_menu == null or not _interact_menu.visible)
 	if is_aiming:
 		var to_mouse := get_global_mouse_position() - global_position

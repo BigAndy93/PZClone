@@ -42,7 +42,7 @@ func update_streaming(player_tile: Vector2i) -> void:
 			var coord := Vector2i(cx, cy)
 			var chunk_id := chunk_id_for(coord)
 			should_load[chunk_id] = coord
-			var in_active := abs(cx - center.x) <= active_radius and abs(cy - center.y) <= active_radius
+			var in_active: bool = abs(cx - center.x) <= active_radius and abs(cy - center.y) <= active_radius
 			if in_active:
 				should_activate[chunk_id] = coord
 
