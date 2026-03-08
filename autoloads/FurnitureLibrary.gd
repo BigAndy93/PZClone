@@ -161,16 +161,17 @@ static func get_sprite_sheet_specs() -> Dictionary:
 			"frame_rows": 2,
 			# Standard NE/SE/SW/NW layout:
 			"rot_frames": {
-				0: Vector2i(0, 0),   # NE-facing (N-wall placement)
-				1: Vector2i(1, 0),   # SE-facing (E-wall placement)
-				2: Vector2i(0, 1),   # SW-facing (S-wall placement)
-				3: Vector2i(1, 1),   # NW-facing (W-wall placement)
+				0: Vector2i(0, 0),   # NE-facing / North (N-wall placement)
+				1: Vector2i(1, 0),   # SE-facing / East  (E-wall placement)
+				2: Vector2i(0, 1),   # SW-facing / South (S-wall placement)
+				3: Vector2i(1, 1),   # NW-facing / West  (W-wall placement)
 			},
-			# Pixel in each frame that aligns with the tile's isometric floor center.
-			# (0.5 = horizontally centered, 0.82 = ~82% down the frame height)
-			"anchor_frac": Vector2(0.50, 0.82),
-			# Scale to match game tile size. Increase/decrease to resize the sprite.
-			"scale": 0.20,
+			# Pivot from spritesheet.json: pixel (64, 109) in each 128×128 frame.
+			# anchor_frac = pivot / frame_size = (64/128, 109/128).
+			# This point aligns with the tile's isometric floor center (local_c).
+			"anchor_frac": Vector2(0.5, 109.0 / 128.0),
+			# Native scale — sprite designed at 64×32 tile resolution (diamond w=64 h=32).
+			"scale": 1.0,
 		},
 	}
 
