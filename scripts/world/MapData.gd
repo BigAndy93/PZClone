@@ -48,6 +48,7 @@ const FURN_NIGHTSTAND := 10
 const FURN_FRIDGE     := 11
 const FURN_DRESSER    := 12
 const FURN_BATHTUB    := 13
+const FURN_COUCH      := 14   # sprite-sheet asset (assets/furniture/couch_sheet.png)
 
 # ── Map dimensions ────────────────────────────────────────────────────────────
 var seed_value:    int = 0
