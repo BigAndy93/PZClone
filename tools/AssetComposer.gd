@@ -405,7 +405,7 @@ func _refresh_placement_list() -> void:
 	for i in placements.size():
 		var placement: Dictionary = placements[i]
 		var asset := placement.get("asset", "")
-		var leaf := asset.get_file()
+		var leaf: String = asset.get_file()
 		var coords := "(%d,%d,%d)" % [placement.get("x", 0), placement.get("y", 0), placement.get("z", 0)]
 		_placement_list.add_item("%02d  %s  %s" % [i, leaf, coords])
 	_clear_placement_editor()
