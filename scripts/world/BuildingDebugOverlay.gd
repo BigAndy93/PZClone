@@ -18,14 +18,21 @@ var _data:    MapData
 var _tilemap: WorldTileMap
 var _origin:  Vector2i
 var _enabled: bool = false
+var _chunk_manager: ChunkManager
 
 
-func setup(data: MapData, tilemap: WorldTileMap, origin: Vector2i) -> void:
-	_data    = data
-	_tilemap = tilemap
-	_origin  = origin
-	visible  = false
+func setup(data: MapData, tilemap: WorldTileMap, origin: Vector2i, chunk_manager: ChunkManager = null) -> void:
+	_data          = data
+	_tilemap       = tilemap
+	_origin        = origin
+	_chunk_manager = chunk_manager
+	visible        = false
 
+
+
+func _process(_delta: float) -> void:
+	if _enabled:
+		queue_redraw()
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventKey and (event as InputEventKey).pressed \
@@ -94,6 +101,20 @@ func _draw() -> void:
 			var label      := "R%d" % room.id
 			draw_string(ThemeDB.fallback_font, screen_pos + Vector2(-10.0, 4.0),
 			            label, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, C_ROOM_ID)
+
+	# ── Chunk telemetry ───────────────────────────────────────────────────────
+	if _chunk_manager != null:
+		var snap := _chunk_manager.get_debug_snapshot()
+		var text := "Chunks A:%d L:%d T:%d" % [
+			snap.get("active_count", 0),
+			snap.get("loaded_count", 0),
+			snap.get("total_count", 0),
+		]
+		var events: Array = snap.get("recent_events", [])
+		var tail := events.back() if not events.is_empty() else "none"
+		draw_rect(Rect2(Vector2(10, 10), Vector2(270, 30)), Color(0.05, 0.05, 0.05, 0.70), true)
+		draw_string(ThemeDB.fallback_font, Vector2(14, 22), text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color(0.95, 0.95, 0.95, 0.95))
+		draw_string(ThemeDB.fallback_font, Vector2(14, 34), "Last: %s" % tail, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0.82, 0.82, 0.82, 0.92))
 
 
 func _edge_color(ek: Vector3i, player_built: bool) -> Color:

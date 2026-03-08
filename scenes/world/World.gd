@@ -36,6 +36,8 @@ var _door_nodes:              Dictionary                   = {}  # Vector3i → 
 var _window_nodes:            Dictionary                   = {}  # Vector3i → WindowNode
 var _roof_nodes:              Array                        = []  # [{poly, bp}]
 var _wall_collision_manager:  WallCollisionManager
+var _chunk_manager:          ChunkManager
+var _room_detection_service: RoomDetectionService
 
 # Cutaway / visibility state
 var _cutaway_timer:    float                = 0.0
@@ -47,6 +49,15 @@ var _player_room_id:   int                  = -1
 func _ready() -> void:
 	add_to_group("world_node")
 	entities_container.add_to_group("players_container")  # legacy group for discovery
+
+	# World foundation services.
+	_chunk_manager = ChunkManager.new()
+	_chunk_manager.name = "ChunkManager"
+	add_child(_chunk_manager)
+
+	_room_detection_service = RoomDetectionService.new()
+	_room_detection_service.name = "RoomDetectionService"
+	add_child(_room_detection_service)
 
 	# Wall collision manager lives outside Entities so it isn't y-sorted.
 	_wall_collision_manager = WallCollisionManager.new()
@@ -93,7 +104,20 @@ func _process(delta: float) -> void:
 	if _cutaway_timer >= 0.12:
 		_cutaway_timer = 0.0
 		_update_building_cutaway()
+		_update_chunk_streaming()
 
+
+
+func _update_chunk_streaming() -> void:
+	if _map_data == null or _chunk_manager == null:
+		return
+	var my_id := multiplayer.get_unique_id()
+	for p in get_tree().get_nodes_in_group("players"):
+		if p.get_multiplayer_authority() != my_id:
+			continue
+		var tile := tilemap.local_to_map((p as Node2D).global_position) - _map_data.origin_offset
+		_chunk_manager.update_streaming(tile)
+		break
 
 func _update_building_cutaway() -> void:
 	var my_id := multiplayer.get_unique_id()
@@ -268,6 +292,7 @@ func _set_roof_visible(bp: BuildingBlueprint, v: bool) -> void:
 # ── Map generation ─────────────────────────────────────────────────────────────
 func _generate_map() -> void:
 	_map_data = MapGenerator.generate(map_seed)
+	_room_detection_service.rebuild_all(_map_data)
 	tilemap.setup_from_map_data(_map_data)
 	_wall_collision_manager.setup(_map_data, tilemap, _map_data.origin_offset)
 
@@ -294,7 +319,7 @@ func _generate_map() -> void:
 	var dbg := BuildingDebugOverlay.new()
 	dbg.name = "BuildingDebugOverlay"
 	add_child(dbg)
-	dbg.setup(_map_data, tilemap, _map_data.origin_offset)
+	dbg.setup(_map_data, tilemap, _map_data.origin_offset, _chunk_manager)
 
 	# Defer nav bake one frame so all collision shapes are in the tree.
 	call_deferred("_bake_navigation")
