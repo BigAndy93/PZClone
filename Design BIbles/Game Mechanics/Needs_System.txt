@@ -1,0 +1,543 @@
+# Character Needs System
+
+### Design Document – Player & NPC Survival Needs
+
+### Z-Sims / PZClone
+
+---
+
+# 1. Purpose
+
+The **Needs System** simulates the physical and psychological requirements of all living characters.
+
+It applies to:
+
+* Player characters
+* NPC survivors
+* Future faction members
+
+Needs create **constant survival pressure**, forcing characters to:
+
+* search for food and water
+* rest
+* maintain morale
+* treat injuries
+* manage stress
+
+Later, NPCs will autonomously satisfy their needs using AI behaviors.
+
+This document defines:
+
+* core needs
+* decay systems
+* gameplay effects
+* interaction sources
+* AI support functions
+
+---
+
+# 2. Design Goals
+
+The needs system must:
+
+* create survival tension
+* generate emergent gameplay
+* integrate with AI decision making
+* avoid excessive micromanagement
+* remain performant
+
+Needs must be **simple individually but powerful in combination**.
+
+---
+
+# 3. Core Needs
+
+All characters track the following needs.
+
+```id="f7m8ae"
+hunger
+thirst
+fatigue
+health
+stress
+morale
+pain
+```
+
+Each need has a **0–100 value**.
+
+```id="sb9ty9"
+0 = critical
+50 = normal
+100 = fully satisfied
+```
+
+---
+
+# 4. Needs Data Structure
+
+Example character needs object:
+
+```json id="e1b2zy"
+{
+"hunger": 85,
+"thirst": 90,
+"fatigue": 60,
+"health": 100,
+"stress": 10,
+"morale": 70,
+"pain": 0
+}
+```
+
+Needs change continuously during gameplay.
+
+---
+
+# 5. Need Decay System
+
+Needs decrease over time.
+
+Example decay rates:
+
+| Need    | Decay Rate          |
+| ------- | ------------------- |
+| Hunger  | -1 every 60 seconds |
+| Thirst  | -1 every 45 seconds |
+| Fatigue | -1 every 30 seconds |
+| Morale  | variable            |
+| Health  | injury dependent    |
+
+Example decay logic:
+
+```id="1m97d3"
+update_needs(delta_time)
+```
+
+---
+
+# 6. Hunger
+
+Represents nutritional state.
+
+### Effects of Low Hunger
+
+| Level | Effect               |
+| ----- | -------------------- |
+| 50    | mild stamina loss    |
+| 30    | slower movement      |
+| 20    | severe stamina drain |
+| 10    | health damage begins |
+
+### Hunger Restoration
+
+Sources:
+
+```id="f3cvm3"
+food items
+cooked meals
+snacks
+```
+
+Example:
+
+```id="m8d34e"
+eat_food(item)
+```
+
+---
+
+# 7. Thirst
+
+Represents hydration.
+
+Thirst decays faster than hunger.
+
+### Effects of Low Thirst
+
+| Level | Effect                   |
+| ----- | ------------------------ |
+| 40    | stamina recovery reduced |
+| 20    | movement speed reduced   |
+| 10    | health loss begins       |
+
+### Thirst Restoration
+
+Sources:
+
+```id="w7dnrn"
+water bottles
+clean water
+drinks
+```
+
+Example function:
+
+```id="r5g1vi"
+drink_liquid(item)
+```
+
+---
+
+# 8. Fatigue
+
+Represents sleep deprivation.
+
+Fatigue increases with:
+
+* movement
+* combat
+* injuries
+* stress
+
+### Effects
+
+| Level | Effect                  |
+| ----- | ----------------------- |
+| 50    | slower stamina recovery |
+| 30    | combat penalties        |
+| 15    | hallucinations possible |
+
+### Fatigue Recovery
+
+Sources:
+
+```id="i0ghp9"
+sleep in bed
+rest on furniture
+sit idle
+```
+
+Example:
+
+```id="u0gnfa"
+sleep(hours)
+```
+
+---
+
+# 9. Health
+
+Represents physical condition.
+
+Health decreases from:
+
+```id="j3a0gi"
+zombie attacks
+bleeding
+starvation
+infection
+fire
+```
+
+### Health Restoration
+
+Sources:
+
+```id="slmb4p"
+bandaging wounds
+medical treatment
+rest
+medicine
+```
+
+Example:
+
+```id="zkz9pa"
+apply_medical_item(item)
+```
+
+---
+
+# 10. Stress
+
+Stress reflects mental pressure.
+
+Stress increases due to:
+
+```id="pb9vxt"
+zombie encounters
+dark environments
+injury
+lack of sleep
+isolation
+combat
+```
+
+### Effects
+
+High stress may cause:
+
+```id="l8o8yb"
+panic
+shaking aim
+reduced accuracy
+slower actions
+```
+
+### Stress Reduction
+
+Sources:
+
+```id="oxfcr9"
+safe environments
+sleep
+companionship
+rest
+entertainment
+```
+
+---
+
+# 11. Morale
+
+Morale represents emotional well-being.
+
+Morale affects decision-making and performance.
+
+### Positive Sources
+
+```id="46h1vp"
+safe shelter
+good food
+friends nearby
+successful combat
+```
+
+### Negative Sources
+
+```id="7ys3pt"
+death of allies
+constant danger
+starvation
+long isolation
+```
+
+### Effects
+
+Low morale may cause:
+
+```id="az2y3i"
+refusing actions
+panic
+slow reactions
+```
+
+---
+
+# 12. Pain
+
+Pain represents physical suffering.
+
+Pain increases from:
+
+```id="8v6r79"
+injuries
+burns
+broken bones
+infection
+```
+
+### Effects
+
+Pain may cause:
+
+```id="18l3id"
+reduced movement
+attack penalties
+slow interactions
+```
+
+### Treatment
+
+Sources:
+
+```id="isjz41"
+painkillers
+medical treatment
+rest
+```
+
+---
+
+# 13. Needs Threshold System
+
+Needs trigger behavioral states when crossing thresholds.
+
+Example hunger thresholds:
+
+```id="20etks"
+>70 satisfied
+50–70 normal
+30–50 hungry
+15–30 starving
+<15 critical
+```
+
+These states drive **NPC behavior decisions**.
+
+---
+
+# 14. NPC Autonomous Need Fulfillment
+
+NPCs must automatically attempt to satisfy needs.
+
+Behavior priority example:
+
+```id="2mw3h2"
+if thirst < hunger → find water
+if hunger < thirst → find food
+if fatigue critical → sleep
+if health low → seek medicine
+```
+
+Needs act as **AI behavior drivers**.
+
+---
+
+# 15. AI Need Evaluation Function
+
+NPCs periodically evaluate needs.
+
+Example:
+
+```id="k5y8kk"
+evaluate_needs(character)
+```
+
+Returns priority actions:
+
+```id="ip4vzi"
+find_food
+find_water
+rest
+seek_medical_help
+socialize
+```
+
+---
+
+# 16. Resource Discovery Functions
+
+NPCs must search environment.
+
+Example:
+
+```id="x2l8i0"
+find_nearest_food()
+find_nearest_water()
+find_bed()
+find_medical_item()
+```
+
+These functions query the world environment.
+
+---
+
+# 17. Interaction Functions
+
+Characters must be able to interact with objects.
+
+Examples:
+
+```id="w3nlpr"
+eat_food(item)
+drink_liquid(item)
+sleep(bed)
+rest(chair)
+take_medication(item)
+wash_wounds(sink)
+```
+
+These functions affect needs values.
+
+---
+
+# 18. Pathfinding Support
+
+NPCs must move toward need solutions.
+
+Example:
+
+```id="4fhy75"
+path_to_resource(resource)
+```
+
+Resources include:
+
+```id="g2kjsa"
+food containers
+water sources
+beds
+medicine
+```
+
+---
+
+# 19. Decision Loop
+
+NPCs follow a repeating behavior cycle.
+
+Example:
+
+```id="8yiyqh"
+1 evaluate_needs
+2 select highest priority need
+3 search environment
+4 pathfind to resource
+5 interact with object
+6 update needs
+```
+
+This loop repeats continuously.
+
+---
+
+# 20. Future Expansion
+
+The system should support future additions.
+
+Possible future needs:
+
+```id="6jkr9e"
+hygiene
+temperature
+social connection
+boredom
+fear
+```
+
+---
+
+# 21. Integration With Other Systems
+
+Needs interact with:
+
+* inventory system
+* crafting
+* medical system
+* furniture interactions
+* AI behavior system
+* morale system
+
+---
+
+# 22. Summary
+
+The Needs System creates survival pressure for both players and NPCs.
+
+Key features:
+
+```id="6n4vhr"
+continuous need decay
+resource-driven recovery
+behavior thresholds
+AI need evaluation
+environment interaction
+```
+
+NPCs will eventually become **self-sustaining agents**, capable of seeking resources and surviving independently.
+
+---
+
+END DOCUMENT

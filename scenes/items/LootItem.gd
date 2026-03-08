@@ -20,6 +20,11 @@ func _ready() -> void:
 	_build_collision()
 
 
+## Show or hide this loot item for client-side room occlusion.
+func set_occlusion_visible(v: bool) -> void:
+	visible = v
+
+
 func _build_visual() -> void:
 	const S := 8.0
 	var poly     := Polygon2D.new()

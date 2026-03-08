@@ -1,13 +1,16 @@
 ## FurnitureLibrary — canonical list of every unique furniture spec used by
 ## ProceduralBuilding across all 12 archetypes.
 ##
-## Box spec format:  [sn, se, h, top_c, side_c]
-##               OR  [sn, se, h, top_c, side_c, [rot0, rot1, ...]]
-## If a rots array is provided (element 5), FurnitureBaker pre-bakes all listed rotations.
-## Directional pieces (counters, shelves, racks) include [0, 1] so both E-W and N-S
-## orientations are available without runtime pixel rotation (no distortion).
+## Box spec format: Dictionary with keys:
+##   sn       float   — north half-extent scale
+##   se       float   — east  half-extent scale
+##   h        float   — height in screen pixels
+##   top_c    Color   — top face colour
+##   side_c   Color   — side face colour
+##   rots     Array   — (optional) rotations to pre-bake, default [0]
+##   type     String  — (optional) per-type bake function key, default "generic"
 ##
-## Flat spec format: [sn, se, col]
+## Flat spec format still uses Array [sn, se, col] for backward compatibility.
 ##
 ## Color constants mirror ProceduralBuilding's _F** palette (art bible §2.1).
 ## FurnitureBaker.warm_batch() uses these to pre-bake all textures before map gen.
@@ -28,60 +31,108 @@ static func get_box_specs() -> Array:
 	var FPL := Color(0.44, 0.40, 0.30)   # pallet
 	return [
 		# ── small_house ─────────────────────────────────────────────────────────
-		[0.88, 1.04,  5.0, FMT,                 FMS                 ],  # small bed
-		[0.28, 0.36,  6.0, FWS,                 FWD                 ],  # side table
-		[0.48, 0.56,  8.0, FWS,                 FWD                 ],  # small table
-		[0.36, 0.40,  9.0, FWD,                 FWD.darkened(0.18)  ],  # small chair
+		{"sn":0.88, "se":1.04, "h": 5.0, "top_c":FMT,                  "side_c":FMS,                  "type":"bed"     },  # small bed
+		{"sn":0.28, "se":0.36, "h": 6.0, "top_c":FWS,                  "side_c":FWD,                  "type":"generic" },  # side table
+		{"sn":0.48, "se":0.56, "h": 8.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table"   },  # small table
+		{"sn":0.36, "se":0.40, "h": 9.0, "top_c":FWD,                  "side_c":FWD.darkened(0.18),   "type":"chair"   },  # small chair
 		# ── medium_house ────────────────────────────────────────────────────────
-		[0.72, 0.88,  5.0, FMT,                 FMS                 ],  # medium bed
-		[0.40, 1.76,  9.0, FSF,                 FSF.darkened(0.25), [0, 1]],  # long sofa
-		[0.56, 0.72,  8.0, FWS,                 FWD                 ],  # medium table
-		[0.28, 0.96, 14.0, FSH,                 FSH.darkened(0.20), [0, 1]],  # bookshelf
+		{"sn":0.72, "se":0.88, "h": 5.0, "top_c":FMT,                  "side_c":FMS,                  "type":"bed",      "rots":[0]   },  # medium bed
+		{"sn":0.40, "se":1.76, "h": 9.0, "top_c":FSF,                  "side_c":FSF.darkened(0.25),   "type":"sofa",     "rots":[0,1] },  # long sofa
+		{"sn":0.56, "se":0.72, "h": 8.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table"   },  # medium table
+		{"sn":0.28, "se":0.96, "h":14.0, "top_c":FSH,                  "side_c":FSH.darkened(0.20),   "type":"shelf",    "rots":[0,1] },  # bookshelf
 		# ── farmhouse ───────────────────────────────────────────────────────────
-		[0.48, 0.64,  8.0, FWS,                 FWD                 ],  # kitchen table
-		[0.48, 0.56, 10.0, FAP.lightened(0.08), FAP                 ],  # stove
-		[0.36, 0.40,  9.0, FWD,                 FWD.darkened(0.18)  ],  # chair (farmhouse)
+		{"sn":0.48, "se":0.64, "h": 8.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table"   },  # kitchen table
+		{"sn":0.48, "se":0.56, "h":10.0, "top_c":FAP.lightened(0.08),  "side_c":FAP,                  "type":"stove"   },  # stove
+		{"sn":0.36, "se":0.40, "h": 9.0, "top_c":FWD,                  "side_c":FWD.darkened(0.18),   "type":"chair"   },  # chair (farmhouse)
 		# ── duplex ──────────────────────────────────────────────────────────────
-		[0.64, 0.72,  5.0, FMT,                 FMS                 ],  # duplex bed
-		[0.40, 1.40,  9.0, FSF,                 FSF.darkened(0.25), [0, 1]],  # short sofa
+		{"sn":0.64, "se":0.72, "h": 5.0, "top_c":FMT,                  "side_c":FMS,                  "type":"bed"     },  # duplex bed
+		{"sn":0.40, "se":1.40, "h": 9.0, "top_c":FSF,                  "side_c":FSF.darkened(0.25),   "type":"sofa",     "rots":[0,1] },  # short sofa
 		# ── convenience_store ───────────────────────────────────────────────────
-		[2.00, 0.36, 14.0, FSH,                 FSH.darkened(0.22), [0, 1]],  # shelf aisle
-		[0.48, 2.20, 10.0, FCT,                 FCS,                [0, 1]],  # service counter
+		{"sn":2.00, "se":0.36, "h":14.0, "top_c":FSH,                  "side_c":FSH.darkened(0.22),   "type":"shelf",    "rots":[0,1] },  # shelf aisle
+		{"sn":0.48, "se":2.20, "h":10.0, "top_c":FCT,                  "side_c":FCS,                  "type":"counter",  "rots":[0,1] },  # service counter
 		# ── pharmacy ────────────────────────────────────────────────────────────
-		[0.44, 2.00, 10.0, FCT,                 FCS,                [0, 1]],  # pharmacy counter
-		[0.24, 2.00, 18.0, FFB,                 FFB.lightened(0.10),[0, 1]],  # back wall cabinet
-		[0.32, 1.28, 16.0, FSH,                 FSH.darkened(0.20), [0, 1]],  # pharmacy shelving
-		[0.32, 0.36,  9.0, FWS,                 FWD                 ],  # waiting chair
+		{"sn":0.44, "se":2.00, "h":10.0, "top_c":FCT,                  "side_c":FCS,                  "type":"counter",  "rots":[0,1] },  # pharmacy counter
+		{"sn":0.24, "se":2.00, "h":18.0, "top_c":FFB,                  "side_c":FFB.lightened(0.10),  "type":"shelf",    "rots":[0,1] },  # back wall cabinet
+		{"sn":0.32, "se":1.28, "h":16.0, "top_c":FSH,                  "side_c":FSH.darkened(0.20),   "type":"shelf",    "rots":[0,1] },  # pharmacy shelving
+		{"sn":0.32, "se":0.36, "h": 9.0, "top_c":FWS,                  "side_c":FWD,                  "type":"chair"   },  # waiting chair
 		# ── restaurant ──────────────────────────────────────────────────────────
-		[0.40, 2.60, 10.0, FAP.lightened(0.08), FAP,                [0, 1]],  # kitchen counter
-		[0.44, 0.52,  8.0, FWS,                 FWD                 ],  # dining table
+		{"sn":0.40, "se":2.60, "h":10.0, "top_c":FAP.lightened(0.08),  "side_c":FAP,                  "type":"counter",  "rots":[0,1] },  # kitchen counter
+		{"sn":0.44, "se":0.52, "h": 8.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table"   },  # dining table
 		# ── office ──────────────────────────────────────────────────────────────
-		[0.56, 0.96,  8.0, FWS,                 FWD,                [0, 1]],  # desk
-		[0.36, 0.48, 14.0, FFB.lightened(0.08), FFB,                [0, 1]],  # filing cabinet
+		{"sn":0.56, "se":0.96, "h": 8.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table",    "rots":[0,1] },  # desk
+		{"sn":0.36, "se":0.48, "h":14.0, "top_c":FFB.lightened(0.08),  "side_c":FFB,                  "type":"filing",   "rots":[0,1] },  # filing cabinet
 		# ── hardware_store ───────────────────────────────────────────────────────
-		[2.08, 0.40, 18.0, FSH,                 FSH.darkened(0.24), [0, 1]],  # rack
-		[0.72, 1.68,  8.0, FPL,                 FPL.darkened(0.20)  ],  # pallet stack
-		[0.40, 2.08, 10.0, FCT,                 FCS,                [0, 1]],  # hardware counter
+		{"sn":2.08, "se":0.40, "h":18.0, "top_c":FSH,                  "side_c":FSH.darkened(0.24),   "type":"shelf",    "rots":[0,1] },  # rack
+		{"sn":0.72, "se":1.68, "h": 8.0, "top_c":FPL,                  "side_c":FPL.darkened(0.20),   "type":"pallet"  },  # pallet stack
+		{"sn":0.40, "se":2.08, "h":10.0, "top_c":FCT,                  "side_c":FCS,                  "type":"counter",  "rots":[0,1] },  # hardware counter
 		# ── warehouse ────────────────────────────────────────────────────────────
-		[0.72, 0.72, 10.0, FPL,                 FPL.darkened(0.22)  ],  # warehouse pallet
-		[0.32, 2.40, 20.0, FSH,                 FSH.darkened(0.26), [0, 1]],  # big shelving (also storage_yard)
+		{"sn":0.72, "se":0.72, "h":10.0, "top_c":FPL,                  "side_c":FPL.darkened(0.22),   "type":"pallet"  },  # warehouse pallet
+		{"sn":0.32, "se":2.40, "h":20.0, "top_c":FSH,                  "side_c":FSH.darkened(0.26),   "type":"shelf",    "rots":[0,1] },  # big shelving (also storage_yard)
 		# ── garage ───────────────────────────────────────────────────────────────
-		[0.36, 2.24, 10.0, FWD,                 FWD.darkened(0.20), [0, 1]],  # workbench
-		[1.20, 0.24, 16.0, FFB.lightened(0.10), FFB,                [0, 1]],  # tool rack
-		[0.36, 0.40, 12.0, FAP,                 FAP.darkened(0.20)  ],  # barrel cluster
+		{"sn":0.36, "se":2.24, "h":10.0, "top_c":FWD,                  "side_c":FWD.darkened(0.20),   "type":"counter",  "rots":[0,1] },  # workbench
+		{"sn":1.20, "se":0.24, "h":16.0, "top_c":FFB.lightened(0.10),  "side_c":FFB,                  "type":"shelf",    "rots":[0,1] },  # tool rack
+		{"sn":0.36, "se":0.40, "h":12.0, "top_c":FAP,                  "side_c":FAP.darkened(0.20),   "type":"generic" },  # barrel cluster
 		# ── storage_yard ─────────────────────────────────────────────────────────
-		[0.64, 0.88, 12.0, FPL,                 FPL.darkened(0.22), [0, 1]],  # storage pallet
+		{"sn":0.64, "se":0.88, "h":12.0, "top_c":FPL,                  "side_c":FPL.darkened(0.22),   "type":"pallet",   "rots":[0,1] },  # storage pallet
 		# ── residential additions ────────────────────────────────────────────────────────
-		[0.24, 0.88, 18.0, FWD,                 FWD.darkened(0.18), [0, 1]],  # wardrobe
-		[0.28, 0.60, 12.0, FWD,                 FWD.darkened(0.20), [0, 1]],  # dresser
-		[0.28, 0.88,  9.0, FSF,                 FSF.darkened(0.25), [0, 1]],  # compact sofa
-		[0.16, 0.72,  4.0, FWS,                 FWD,                [0, 1]],  # coffee table (wide)
-		[0.16, 0.40,  4.0, FWS,                 FWD                 ],  # coffee table (narrow)
-		[0.40, 1.12, 22.0, FWD,                 FWD.darkened(0.18), [0, 1]],  # wardrobe (medium_house NW)
-		[0.36, 0.80,  9.0, FSF,                 FSF.darkened(0.25), [0, 1]],  # sofa (small_house / duplex)
-		[0.24, 0.56,  9.0, FWS,                 FWD,                [0, 1]],  # small desk (medium_house NE)
-		[0.28, 0.40, 12.0, FWD,                 FWD.darkened(0.20)  ],  # dresser narrow (duplex)
+		{"sn":0.24, "se":0.88, "h":18.0, "top_c":FWD,                  "side_c":FWD.darkened(0.18),   "type":"wardrobe", "rots":[0,1] },  # wardrobe
+		{"sn":0.28, "se":0.60, "h":12.0, "top_c":FWD,                  "side_c":FWD.darkened(0.20),   "type":"wardrobe", "rots":[0,1] },  # dresser
+		{"sn":0.28, "se":0.88, "h": 9.0, "top_c":FSF,                  "side_c":FSF.darkened(0.25),   "type":"sofa",     "rots":[0,1] },  # compact sofa
+		{"sn":0.16, "se":0.72, "h": 4.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table",    "rots":[0,1] },  # coffee table (wide)
+		{"sn":0.16, "se":0.40, "h": 4.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table"   },  # coffee table (narrow)
+		{"sn":0.40, "se":1.12, "h":22.0, "top_c":FWD,                  "side_c":FWD.darkened(0.18),   "type":"wardrobe", "rots":[0,1] },  # wardrobe (medium_house NW)
+		{"sn":0.36, "se":0.80, "h": 9.0, "top_c":FSF,                  "side_c":FSF.darkened(0.25),   "type":"sofa",     "rots":[0,1] },  # sofa (small_house / duplex)
+		{"sn":0.24, "se":0.56, "h": 9.0, "top_c":FWS,                  "side_c":FWD,                  "type":"table",    "rots":[0,1] },  # small desk (medium_house NE)
+		{"sn":0.28, "se":0.40, "h":12.0, "top_c":FWD,                  "side_c":FWD.darkened(0.20),   "type":"wardrobe" },  # dresser narrow (duplex)
+		# ── new appliances / bathroom ─────────────────────────────────────────────
+		{"sn":0.44, "se":0.52, "h":18.0, "top_c":FAP,                  "side_c":FAP.darkened(0.15),   "type":"fridge",   "rots":[0,1] },  # fridge
+		{"sn":0.28, "se":0.60, "h":12.0, "top_c":FWS,                  "side_c":FWD,                  "type":"dresser",  "rots":[0,1] },  # dresser (new type)
+		{"sn":0.52, "se":1.04, "h": 6.0, "top_c":Color(0.72,0.74,0.76),"side_c":Color(0.58,0.60,0.62),"type":"bathtub",  "rots":[0,1] },  # bathtub
 	]
+
+
+## Returns the canonical box spec for a MapData FURN_* type at a given rotation (0-3).
+## Used by BuildingTileRenderer to look up FurnitureBaker keys for spawning sprites.
+## Returns an empty Dictionary if the type is unknown or FURN_NONE.
+static func spec_for_furn(furn_type: int, rot: int = 0) -> Dictionary:
+	var FWD := Color(0.46, 0.34, 0.20)
+	var FWS := Color(0.58, 0.46, 0.28)
+	var FMT := Color(0.64, 0.60, 0.54)
+	var FMS := Color(0.52, 0.48, 0.42)
+	var FSF := Color(0.30, 0.25, 0.36)
+	var FSH := Color(0.34, 0.26, 0.16)
+	var FFB := Color(0.22, 0.20, 0.18)
+	var FCT := Color(0.44, 0.38, 0.28)
+	var FCS := Color(0.32, 0.26, 0.18)
+	var FAP := Color(0.26, 0.28, 0.30)
+	match furn_type:
+		MapData.FURN_BED:
+			return {"sn":0.88, "se":1.04, "h": 5.0, "top_c":FMT, "side_c":FMS, "type":"bed",     "rot":rot}
+		MapData.FURN_DESK:
+			return {"sn":0.56, "se":0.96, "h": 8.0, "top_c":FWS, "side_c":FWD, "type":"table",   "rot":rot}
+		MapData.FURN_CHAIR:
+			return {"sn":0.36, "se":0.40, "h": 9.0, "top_c":FWD, "side_c":FWD.darkened(0.18), "type":"chair", "rot":rot}
+		MapData.FURN_TABLE:
+			return {"sn":0.48, "se":0.56, "h": 8.0, "top_c":FWS, "side_c":FWD, "type":"table",   "rot":rot}
+		MapData.FURN_SOFA:
+			return {"sn":0.40, "se":1.40, "h": 9.0, "top_c":FSF, "side_c":FSF.darkened(0.25), "type":"sofa", "rot":rot}
+		MapData.FURN_SHELF:
+			return {"sn":0.28, "se":0.96, "h":14.0, "top_c":FSH, "side_c":FSH.darkened(0.20), "type":"shelf", "rot":rot}
+		MapData.FURN_COUNTER:
+			return {"sn":0.48, "se":2.20, "h":10.0, "top_c":FCT, "side_c":FCS, "type":"counter", "rot":rot}
+		MapData.FURN_STOVE:
+			return {"sn":0.48, "se":0.56, "h":10.0, "top_c":FAP.lightened(0.08), "side_c":FAP, "type":"stove", "rot":rot}
+		MapData.FURN_LOCKER:
+			return {"sn":0.36, "se":0.48, "h":14.0, "top_c":FFB.lightened(0.08), "side_c":FFB, "type":"filing", "rot":rot}
+		MapData.FURN_NIGHTSTAND:
+			return {"sn":0.28, "se":0.36, "h": 6.0, "top_c":FWS, "side_c":FWD, "type":"generic", "rot":rot}
+		MapData.FURN_FRIDGE:
+			return {"sn":0.44, "se":0.52, "h":18.0, "top_c":FAP, "side_c":FAP.darkened(0.15), "type":"fridge", "rot":rot}
+		MapData.FURN_DRESSER:
+			return {"sn":0.28, "se":0.60, "h":12.0, "top_c":FWS, "side_c":FWD, "type":"dresser", "rot":rot}
+		MapData.FURN_BATHTUB:
+			return {"sn":0.52, "se":1.04, "h": 6.0, "top_c":Color(0.72,0.74,0.76), "side_c":Color(0.58,0.60,0.62), "type":"bathtub", "rot":rot}
+	return {}
 
 
 static func get_flat_specs() -> Array:

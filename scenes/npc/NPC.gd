@@ -287,6 +287,12 @@ static func _item_data_for_name(item_name: String) -> ItemData:
 	return null
 
 
+## Show or hide this NPC's visual for client-side room occlusion.
+func set_occlusion_visible(v: bool) -> void:
+	if _npc_visual:
+		_npc_visual.visible = v
+
+
 # ── Stick-man + top-hat visual ─────────────────────────────────────────────────
 # All coordinates relative to CharacterBody2D origin (capsule centre ≈ mid-torso).
 

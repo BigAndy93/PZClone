@@ -6,7 +6,7 @@ extends Node
 const TICK_RATE: float = 5.0
 
 # ── Debug ───────────────────────────────────────────────────────────────────────
-const DEBUG_GOD_MODE := true    # set true to disable all incoming damage
+const DEBUG_GOD_MODE := false   # set true to disable all incoming damage
 
 # Decay per tick
 const HUNGER_DECAY:  float = 1.5
@@ -176,6 +176,11 @@ func _tick_temperature() -> void:
 	var hour:    float = DayNightCycle.time_of_day
 	# sin peaks at hour 9, troughs at hour 21 — shifted by 0.125 of TAU.
 	var ambient: float = 37.0 + 2.5 * sin(TAU * (hour / 24.0 - 0.125))
+
+	# Weather modifies ambient temperature.
+	var weather_sys: WeatherSystem = get_tree().get_first_node_in_group("weather_system")
+	if weather_sys:
+		ambient += weather_sys.get_temp_offset()
 
 	# Indoors: temperature is insulated — ambient clamps to a narrower band.
 	if _is_player_sheltered():

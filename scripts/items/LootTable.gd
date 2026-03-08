@@ -43,7 +43,7 @@ static func get_item_for_zone(zone_type: int, rng: RandomNumberGenerator) -> Ite
 	var pool: Array = []
 
 	match zone_type:
-		BuildingData.ZoneType.RESIDENTIAL:
+		BuildingBlueprint.ZoneType.RESIDENTIAL:
 			pool = [
 				["Canned Food",   ItemData.Type.FOOD,     {"hunger":  35.0},                                                              4],
 				["Water Bottle",  ItemData.Type.WATER,    {"thirst":  40.0},                                                              4],
@@ -58,7 +58,7 @@ static func get_item_for_zone(zone_type: int, rng: RandomNumberGenerator) -> Ite
 				["Cargo Pants",   ItemData.Type.CLOTHING, {"insulation": 0.10, "pocket_grid": "3x1"},                                     1],
 				["Satchel",       ItemData.Type.CLOTHING, {"insulation": 0.00, "hand_grid": "3x2", "equip_slot": "hand"},                 1],
 			]
-		BuildingData.ZoneType.COMMERCIAL:
+		BuildingBlueprint.ZoneType.COMMERCIAL:
 			pool = [
 				["Protein Bar",   ItemData.Type.FOOD,     {"hunger":  20.0},                                                              3],
 				["Soda",          ItemData.Type.WATER,    {"thirst":  25.0},                                                              3],
@@ -76,7 +76,7 @@ static func get_item_for_zone(zone_type: int, rng: RandomNumberGenerator) -> Ite
 				["Jacket",        ItemData.Type.CLOTHING, {"insulation": 0.40, "pocket_grid": "3x2"},                                     1],
 				["Work Vest",     ItemData.Type.CLOTHING, {"insulation": 0.25, "pocket_grid": "3x2"},                                     1],
 			]
-		BuildingData.ZoneType.INDUSTRIAL:
+		BuildingBlueprint.ZoneType.INDUSTRIAL:
 			pool = [
 				["Crowbar",       ItemData.Type.WEAPON,   {"melee_bonus": 35.0},                                                          4],
 				["Metal Pipe",    ItemData.Type.WEAPON,   {"melee_bonus": 25.0},                                                          3],
@@ -88,7 +88,7 @@ static func get_item_for_zone(zone_type: int, rng: RandomNumberGenerator) -> Ite
 				["Tactical Vest", ItemData.Type.CLOTHING, {"insulation": 0.20, "pocket_grid": "4x3"},                                     1],
 				["Small Backpack",ItemData.Type.CLOTHING, {"insulation": 0.05, "back_grid": "4x3", "equip_slot": "back"},                 1],
 			]
-		BuildingData.ZoneType.RURAL:
+		BuildingBlueprint.ZoneType.RURAL:
 			pool = [
 				["Canned Food",   ItemData.Type.FOOD,     {"hunger":  40.0},                                                              4],
 				["Wild Berries",  ItemData.Type.FOOD,     {"hunger":  12.0},                                                              3],

@@ -1,6 +1,9 @@
 extends Node
 
 signal zombie_alerted(zombie: Node, alerter_position: Vector2)
+signal horde_alerted()
+signal weather_changed(weather_type: int)
+signal player_hit(peer_id: int, damage: float)
 signal player_stat_critical(peer_id: int, stat_name: String)
 signal npc_killed(npc: Node, killer_peer_id: int)
 signal trade_completed(peer_id: int, faction_id: String)

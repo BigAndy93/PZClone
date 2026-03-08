@@ -56,6 +56,10 @@ func _do_attack() -> void:
 	if tick_system and tick_system.has_method("apply_damage_immediate"):
 		tick_system.apply_damage_immediate(zombie.attack_damage)
 
+	# Notify all clients: flash the hit player red + camera shake on their machine.
+	if zombie.chase_target.has_method("rpc_player_hit"):
+		zombie.chase_target.rpc_player_hit.rpc(zombie.attack_damage)
+
 	SoundBus.emit_noise(zombie.global_position, SoundBus.RADIUS_MELEE_HIT, "zombie_attack")
 
 

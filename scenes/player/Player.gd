@@ -26,9 +26,21 @@ var selected_slot:     int           = 0
 var _ranged_cooldown:     float = 0.0
 var _ammo_loaded:         int   = 0    # rounds currently chambered
 var _stamina_regen_pause: float = 0.0  # delay before stamina starts recovering
+var _hit_flash_timer:     float = 0.0  # seconds remaining for red hit flash
 var is_resting:           bool  = false  # H-key rest mode (server-synced)
 var is_sneaking:          bool  = false  # Z-key sneak mode
 var is_aiming:            bool  = false  # RMB held — required to attack
+
+# ── Window crawl (hold F) ─────────────────────────────────────────────────────
+const WINDOW_CRAWL_TIME: float  = 2.0
+var _hold_f_timer:        float  = 0.0
+var _hold_f_target:       Area2D = null
+
+# ── Interact context menu ─────────────────────────────────────────────────────
+var _interact_menu: InteractMenu = null
+
+# ── Build mode ────────────────────────────────────────────────────────────────
+var _build_mode_controller: BuildModeController = null
 
 # ── Procedural visual state ────────────────────────────────────────────────────
 var _player_visual:  Node2D    = null   # root procedural body node
@@ -176,6 +188,14 @@ func _ready() -> void:
 
 	if authority == my_id:
 		stats.stat_critical.connect(_on_stat_critical)
+		# Interact context menu — local player only.
+		_interact_menu = InteractMenu.new()
+		add_child(_interact_menu)
+		# Build mode controller — local player only.
+		_build_mode_controller = BuildModeController.new()
+		add_child(_build_mode_controller)
+		# Deferred so the world node is in the tree before setup runs.
+		_build_mode_controller.setup.call_deferred(self)
 
 	EventBus.player_spawned.emit(authority, self)
 
@@ -200,6 +220,18 @@ func _unhandled_input(event: InputEvent) -> void:
 			_toggle_rest()
 		elif kc == KEY_Z:
 			_toggle_sneak()
+		elif kc == KEY_B:
+			_toggle_build_mode()
+	elif event is InputEventMouseButton:
+		var mb := event as InputEventMouseButton
+		if mb.button_index == MOUSE_BUTTON_LEFT and mb.pressed \
+				and not Input.is_action_pressed("aim"):
+			_try_click_interact()
+		elif mb.button_index == MOUSE_BUTTON_RIGHT and mb.pressed:
+			var objs := _collect_interactable_objects()
+			if not objs.is_empty():
+				_interact_menu.show_at(get_viewport().get_mouse_position(), objs)
+				get_viewport().set_input_as_handled()
 
 
 # ── Per-frame ─────────────────────────────────────────────────────────────────
@@ -232,6 +264,7 @@ func _physics_process(delta: float) -> void:
 	_handle_movement(delta)
 	_handle_aim()
 	_check_interact_input()
+	_update_hold_interact(delta)
 	_check_attack_input()
 	_check_use_item_input()
 	_update_stamina(delta)
@@ -335,22 +368,23 @@ func _check_interact_input() -> void:
 			_open_container(area as WorldContainer)
 			return
 
-	# Priority 3: loot items (Area2D overlaps).
+	# Priority 3: doors.
 	for area in interact_area.get_overlapping_areas():
-		if area.is_in_group("loot_items") and area is LootItem:
-			_try_pickup(area as LootItem)
+		if area.is_in_group("doors"):
+			_try_interact_door(area)
 			return
 
 	# Priority 4: windows.
 	for area in interact_area.get_overlapping_areas():
 		if area.is_in_group("windows"):
+			if _window_is_crawlable(area):
+				# Already open/broken — start crawl hold instead of toggling.
+				_hold_f_target = area
+				_hold_f_timer  = 0.0
+				EventBus.item_used.emit(get_multiplayer_authority(),
+						"Hold F to crawl through window...")
+				return
 			_try_interact_window(area)
-			return
-
-	# Priority 5: doors.
-	for area in interact_area.get_overlapping_areas():
-		if area.is_in_group("doors"):
-			_try_interact_door(area)
 			return
 
 	# Priority 5: NPCs (body overlaps).
@@ -375,25 +409,218 @@ func _try_pickup(item: LootItem) -> void:
 
 
 func _try_interact_window(win_area: Area2D) -> void:
+	if not win_area.has_meta("edge_key"):
+		return
+	var edge_key := win_area.get_meta("edge_key") as Vector3i
 	var world := get_tree().get_first_node_in_group("world_node")
 	if world == null:
 		return
-	var win_path := win_area.get_path()
 	if multiplayer.is_server():
-		world._server_toggle_window(win_path)
+		world._server_interact_window(edge_key)
 	else:
-		world.rpc_id(1, "rpc_request_toggle_window", win_path)
+		world.rpc_id(1, "rpc_request_interact_window", edge_key)
 
 
 func _try_interact_door(door_area: Area2D) -> void:
+	if not door_area.has_meta("edge_key"):
+		return
+	var edge_key := door_area.get_meta("edge_key") as Vector3i
 	var world := get_tree().get_first_node_in_group("world_node")
 	if world == null:
 		return
-	var door_path := door_area.get_path()
 	if multiplayer.is_server():
-		world._server_toggle_door(door_path)
+		world._server_toggle_door(edge_key)
 	else:
-		world.rpc_id(1, "rpc_request_toggle_door", door_path)
+		world.rpc_id(1, "rpc_request_toggle_door", edge_key)
+
+
+## Returns true if the window is open or broken (crawlable, not just togglable).
+func _window_is_crawlable(win_area: Area2D) -> bool:
+	if not win_area.has_meta("edge_key"):
+		return false
+	var world := get_tree().get_first_node_in_group("world_node")
+	if world == null:
+		return false
+	var state: int = world._map_data.window_edges.get(
+			win_area.get_meta("edge_key"), MapData.WIN_INTACT)
+	return state == MapData.WIN_OPEN or state == MapData.WIN_BROKEN
+
+
+## Increments the crawl hold timer each frame; fires crawl on completion or
+## cancels cleanly when F is released early.
+## Also auto-detects open windows while F is held so continuous hold works
+## (e.g. player opens a window on just_press then keeps holding to crawl).
+func _update_hold_interact(delta: float) -> void:
+	if not Input.is_action_pressed("interact"):
+		_hold_f_target = null
+		_hold_f_timer  = 0.0
+		return
+
+	# Auto-scan for an open/broken window if no target yet.
+	# Skip the just-pressed frame — _check_interact_input already handled it.
+	if _hold_f_target == null:
+		if not Input.is_action_just_pressed("interact"):
+			for area: Area2D in interact_area.get_overlapping_areas():
+				if area.is_in_group("windows") and _window_is_crawlable(area):
+					_hold_f_target = area
+					_hold_f_timer  = 0.0
+					EventBus.item_used.emit(get_multiplayer_authority(),
+							"Hold F to crawl through window...")
+					break
+		return
+
+	_hold_f_timer += delta
+	if _hold_f_timer >= WINDOW_CRAWL_TIME:
+		_perform_window_crawl(_hold_f_target)
+		_hold_f_target = null
+		_hold_f_timer  = 0.0
+
+
+## Teleports the local player through the window to the tile on the other side.
+func _perform_window_crawl(win_area: Area2D) -> void:
+	if not win_area.has_meta("edge_key"):
+		return
+	var edge_key := win_area.get_meta("edge_key") as Vector3i
+	var world := get_tree().get_first_node_in_group("world_node")
+	if world == null:
+		return
+	var state: int = world._map_data.window_edges.get(edge_key, MapData.WIN_INTACT)
+	if state != MapData.WIN_OPEN and state != MapData.WIN_BROKEN:
+		return
+
+	var tilemap: WorldTileMap = world.tilemap
+	var origin:  Vector2i    = world._map_data.origin_offset
+	var tx := edge_key.x
+	var ty := edge_key.y
+	var dir := edge_key.z
+
+	# Tile centres on each side of the edge.
+	var center_a := tilemap.map_to_local(Vector2i(tx, ty) + origin)
+	var other_tile := Vector2i(tx, ty - 1) if dir == MapData.DIR_N \
+					  else Vector2i(tx - 1, ty)
+	var center_b   := tilemap.map_to_local(other_tile + origin)
+
+	# Land on the side the player is NOT currently on.
+	var dest := center_b if global_position.distance_to(center_a) \
+				<= global_position.distance_to(center_b) else center_a
+	global_position = dest
+	sync_position   = dest
+	EventBus.item_used.emit(get_multiplayer_authority(), "Crawled through window!")
+	SoundBus.play_sound_at("item_use", dest)
+
+
+## Left-click interact: pick closest loot item, door, or window to the cursor.
+## Loot items can only be picked up via LMB (F key no longer picks up floor loot).
+func _try_click_interact() -> void:
+	var mouse_world := get_global_mouse_position()
+	var best_area: Area2D = null
+	var best_dist := INF
+	for area: Area2D in interact_area.get_overlapping_areas():
+		if not (area.is_in_group("loot_items") or area.is_in_group("doors") \
+				or area.is_in_group("windows")):
+			continue
+		var d := area.global_position.distance_to(mouse_world)
+		if d < best_dist:
+			best_dist = d
+			best_area = area
+	if best_area == null:
+		return
+	if best_area.is_in_group("loot_items") and best_area is LootItem:
+		_try_pickup(best_area as LootItem)
+	elif best_area.is_in_group("doors"):
+		_try_interact_door(best_area)
+	else:
+		_try_interact_window(best_area)
+
+
+## Collects interactable objects near the cursor for the context menu.
+## Returns Array of dicts: {label, actions:[{label, callable}], _sort_dist}.
+func _collect_interactable_objects() -> Array:
+	var world      := get_tree().get_first_node_in_group("world_node")
+	var mouse_world := get_global_mouse_position()
+	var result: Array = []
+
+	for area: Area2D in interact_area.get_overlapping_areas():
+		var obj = null
+		if area.is_in_group("doors") and world != null:
+			obj = _build_door_menu_obj(area, world)
+		elif area.is_in_group("windows") and world != null:
+			obj = _build_window_menu_obj(area, world)
+		elif area.is_in_group("containers") and area is WorldContainer:
+			obj = _build_container_menu_obj(area as WorldContainer)
+		elif area.is_in_group("loot_items") and area is LootItem:
+			obj = _build_loot_menu_obj(area as LootItem)
+		if obj != null:
+			obj["_sort_dist"] = area.global_position.distance_to(mouse_world)
+			result.append(obj)
+
+	for body in interact_area.get_overlapping_bodies():
+		if body.is_in_group("npcs"):
+			var obj = _build_npc_menu_obj(body)
+			obj["_sort_dist"] = body.global_position.distance_to(mouse_world)
+			result.append(obj)
+
+	result.sort_custom(func(a, b): return a["_sort_dist"] < b["_sort_dist"])
+	return result
+
+
+func _build_door_menu_obj(area: Area2D, world: Node) -> Dictionary:
+	var edge_key  := area.get_meta("edge_key") as Vector3i
+	var door_node: DoorNode = world._door_nodes.get(edge_key)
+	var is_open   := door_node != null and door_node.is_open
+	return {
+		"label": "Door",
+		"area":  area,
+		"actions": [{"label": "Close Door" if is_open else "Open Door",
+					 "callable": func(): _try_interact_door(area)}],
+	}
+
+
+func _build_window_menu_obj(area: Area2D, world: Node) -> Dictionary:
+	var edge_key := area.get_meta("edge_key") as Vector3i
+	var state: int = world._map_data.window_edges.get(edge_key, MapData.WIN_INTACT)
+	var actions: Array = []
+	match state:
+		MapData.WIN_INTACT:
+			actions.append({"label": "Open Window",
+							"callable": func(): _try_interact_window(area)})
+		MapData.WIN_OPEN:
+			actions.append({"label": "Close Window",
+							"callable": func(): _try_interact_window(area)})
+			actions.append({"label": "Crawl Through",
+							"callable": func(): _perform_window_crawl(area)})
+		MapData.WIN_BROKEN:
+			actions.append({"label": "Crawl Through",
+							"callable": func(): _perform_window_crawl(area)})
+	return {"label": "Window", "area": area, "actions": actions}
+
+
+func _build_container_menu_obj(container: WorldContainer) -> Dictionary:
+	return {
+		"label": "Container",
+		"area":  container,
+		"actions": [{"label": "Search",
+					 "callable": func(): _open_container(container)}],
+	}
+
+
+func _build_loot_menu_obj(loot: LootItem) -> Dictionary:
+	var item_name := loot.item_data.item_name if loot.item_data != null else "Item"
+	return {
+		"label": item_name,
+		"area":  loot,
+		"actions": [{"label": "Pick Up",
+					 "callable": func(): _try_pickup(loot)}],
+	}
+
+
+func _build_npc_menu_obj(npc: Node) -> Dictionary:
+	return {
+		"label": "Survivor",
+		"area":  npc,
+		"actions": [{"label": "Talk / Trade",
+					 "callable": func(): rpc_request_interact.rpc_id(1, npc.get_path())}],
+	}
 
 
 ## Client → server: request reviving a downed teammate.
@@ -507,6 +734,21 @@ func rpc_notify_drag_carrier(carrier_peer_id: int) -> void:
 	sync_drag_carrier_id = carrier_peer_id
 
 
+## Server → all clients: visual + screen-shake feedback when this player is hit.
+## Red flash is shown for all peers; camera shake + HUD popup only for the local player.
+@rpc("authority", "call_local", "unreliable")
+func rpc_player_hit(damage: float) -> void:
+	_hit_flash_timer = 0.25
+	# Camera shake and HUD damage popup only for the player who was hit.
+	if get_multiplayer_authority() == multiplayer.get_unique_id():
+		if camera and camera.enabled:
+			var shake := Vector2(randf_range(-7.0, 7.0), randf_range(-4.0, 4.0))
+			var tween := create_tween()
+			tween.tween_property(camera, "offset", shake, 0.05)
+			tween.tween_property(camera, "offset", Vector2.ZERO, 0.12)
+		EventBus.player_hit.emit(get_multiplayer_authority(), damage)
+
+
 ## Z key: toggle sneak mode. Client-local; affects speed and noise emission.
 func _toggle_sneak() -> void:
 	is_sneaking = not is_sneaking
@@ -514,6 +756,13 @@ func _toggle_sneak() -> void:
 		_set_resting(false)   # rest cancels on sneak toggle
 	var msg := "Sneaking... [Z] to stand" if is_sneaking else "Standing up"
 	EventBus.item_used.emit(get_multiplayer_authority(), msg)
+
+
+## B key: toggle build mode (wall placement).  Local-only controller handles
+## ghost preview and sends wall RPCs to the server.
+func _toggle_build_mode() -> void:
+	if _build_mode_controller:
+		_build_mode_controller.toggle()
 
 
 ## H key: toggle rest mode. Server authoritative — fatigue is synced.
@@ -575,7 +824,8 @@ func server_clear_drag_state() -> void:
 
 # ── Aim (RMB held) ────────────────────────────────────────────────────────────
 func _handle_aim() -> void:
-	is_aiming = Input.is_action_pressed("aim")
+	is_aiming = Input.is_action_pressed("aim") \
+		and (_interact_menu == null or not _interact_menu.visible)
 	if is_aiming:
 		var to_mouse := get_global_mouse_position() - global_position
 		if to_mouse.length_squared() > 1.0:
@@ -849,14 +1099,21 @@ func _toggle_inventory_window() -> void:
 	var hud_nodes := get_tree().get_nodes_in_group("hud")
 	if hud_nodes.is_empty():
 		return
-	var hud = hud_nodes[0]
-	var win = hud.get("_inventory_window")
-	if win == null:
+	var hud        = hud_nodes[0]
+	var inv_win    = hud.get("_inventory_window")
+	var ground_win = hud.get("_ground_window")
+	if inv_win == null:
 		return
-	if win.visible:
-		win.hide()
+	var showing: bool = not inv_win.visible
+	if showing:
+		inv_win.show()
+		if ground_win != null:
+			ground_win.refresh()
+			ground_win.show()
 	else:
-		win.show()
+		inv_win.hide()
+		if ground_win != null:
+			ground_win.hide()
 
 
 # ── Item drop (Q) / crafting (C) ──────────────────────────────────────────────
@@ -912,6 +1169,8 @@ func _update_animation(delta: float = 0.0) -> void:
 	if _player_visual == null:
 		return
 
+	_hit_flash_timer = maxf(_hit_flash_timer - delta, 0.0)
+
 	var is_local := get_multiplayer_authority() == multiplayer.get_unique_id()
 	var facing   := facing_direction if is_local else sync_facing
 	var moving   := velocity.length() > 5.0 if is_local else sync_velocity.length() > 5.0
@@ -927,7 +1186,12 @@ func _update_animation(delta: float = 0.0) -> void:
 		_player_visual.scale    = Vector2(1.0, 1.0)
 		return
 
-	_player_visual.modulate  = Color.WHITE
+	# ── Hit flash: briefly red when taking damage ──────────────────────────
+	if _hit_flash_timer > 0.0:
+		var ft := _hit_flash_timer / 0.25
+		_player_visual.modulate = Color(1.0, 1.0 - 0.7 * ft, 1.0 - 0.7 * ft)
+	else:
+		_player_visual.modulate = Color.WHITE
 	_player_visual.rotation  = 0.0
 
 	# ── 8-direction pose swap ─────────────────────────────────────────────
@@ -1017,6 +1281,13 @@ func _setup_multiplayer_sync() -> void:
 	config.property_set_replication_mode(NodePath(".:sync_sneak"),
 			SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	sync.replication_config = config
+
+
+## Show or hide this player's visual for client-side room occlusion.
+## Only applied to non-local players by World.gd.
+func set_occlusion_visible(v: bool) -> void:
+	if _player_visual:
+		_player_visual.visible = v
 
 
 # ── Procedural player visual ──────────────────────────────────────────────────

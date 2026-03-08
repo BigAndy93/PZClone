@@ -270,6 +270,12 @@ func take_damage(amount: float, attacker_peer_id: int = 0, knockback_dir: Vector
 		die(attacker_peer_id)
 
 
+## Show or hide this zombie's visual for client-side room occlusion.
+func set_occlusion_visible(v: bool) -> void:
+	if _visual_root:
+		_visual_root.visible = v
+
+
 @rpc("authority", "call_local", "unreliable")
 func flash_hit() -> void:
 	SoundBus.play_sound_at("zombie_hit", global_position)

@@ -1,5 +1,5 @@
 ## FurnitureBaker — bakes procedural furniture pieces into ImageTextures via SubViewport.
-## Each unique (sn, se, h, top_c, side_c) combination is baked once at startup,
+## Each unique (sn, se, h, top_c, side_c, rot, type) combination is baked once at startup,
 ## then served as Sprite2D nodes by ProceduralBuilding._fb() / _fn().
 ##
 ## Usage in World._ready():
@@ -17,7 +17,7 @@ const BAKE_H  : int     = 256
 ## Pixel in the baked texture that corresponds to the furniture's floor-contact point.
 const BAKE_FC : Vector2 = Vector2(160.0, 200.0)
 const BAKE_NV : Vector2 = Vector2(0.0,  -16.0)   # north axis (1-tile half-extent = TILE_H*0.5)
-const BAKE_EV : Vector2 = Vector2(32.0,  16.0)   # east axis  (1-tile step = TILE_W*0.5, TILE_H*0.5)
+const BAKE_EV : Vector2 = Vector2(32.0,   0.0)   # east axis  (1-tile E vertex = TILE_W*0.5, purely horizontal)
 
 ## key → ImageTexture
 var _cache : Dictionary = {}
@@ -41,17 +41,11 @@ func get_texture(key: String) -> ImageTexture:
 	return _cache.get(key) as ImageTexture
 
 ## Returns a Sprite2D that places the BAKE_FC pixel at local_c with no rotation.
-## The bake canvas uses BAKE_NV=(0,-16) / BAKE_EV=(32,16) — screen-axis-aligned — so
-## rendering without rotation keeps furniture aligned with the tile grid on all building
-## shapes (square or rectangular).  nv/ev are unused but kept for API compatibility.
-## rot is encoded in the key — the correct pre-baked orientation is fetched from cache.
 func make_sprite(key: String, nv: Vector2, ev: Vector2, local_c: Vector2, rot: int = 0) -> Sprite2D:
 	var spr := Sprite2D.new()
 	spr.texture        = _cache[key]
 	spr.centered       = false
 	spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
-	# Axis-aligned: bake X → screen right (1,0), bake Y → screen down (0,1).
-	# BAKE_FC pixel lands at local_c; furniture aligns with the tile grid.
 	spr.transform = Transform2D(
 		Vector2(1.0, 0.0), Vector2(0.0, 1.0),
 		local_c - Vector2(BAKE_FC.x, BAKE_FC.y))
@@ -59,27 +53,28 @@ func make_sprite(key: String, nv: Vector2, ev: Vector2, local_c: Vector2, rot: i
 
 
 ## Bakes all unique specs into cached ImageTextures.
-## Awaitable coroutine — World._ready() must await this before _generate_map().
-## Re-calling with already-cached keys is safe and returns instantly.
-##
-## Box spec format: [sn, se, h, tc, sc]  OR  [sn, se, h, tc, sc, [rot0, rot1, ...]]
-## If a rots array (element 5) is present, all listed rotations are baked.
-## Otherwise only rot=0 is baked (backward-compatible).
+## Box spec format: Dictionary with keys sn, se, h, top_c, side_c,
+##   optional rots (Array, default [0]), optional type (String, default "generic").
+## Flat spec format still uses Array [sn, se, col] for backward compat.
 func warm_batch(box_specs: Array, flat_specs: Array) -> void:
-	var pairs : Array = []   # [{key, vp}]
+	var pairs : Array = []
 
 	for spec in box_specs:
-		var rots: Array = [0]
-		if spec.size() >= 6 and spec[5] is Array:
-			rots = spec[5]
+		var sn    : float  = spec["sn"]
+		var se    : float  = spec["se"]
+		var h     : float  = spec["h"]
+		var top_c : Color  = spec["top_c"]
+		var side_c: Color  = spec["side_c"]
+		var rots  : Array  = spec.get("rots", [0])
+		var type  : String = spec.get("type", "generic")
 		for rot in rots:
-			var key := box_key(spec[0], spec[1], spec[2], spec[3], spec[4], rot)
+			var key := box_key(sn, se, h, top_c, side_c, rot)
 			if _cache.has(key):
 				continue
 			var vp   := _make_viewport()
 			var root := Node2D.new()
 			vp.add_child(root)
-			_bake_box_into(root, spec[0], spec[1], spec[2], spec[3], spec[4], rot)
+			_bake_box_into(root, sn, se, h, top_c, side_c, rot, type)
 			add_child(vp)
 			pairs.append({ "key": key, "vp": vp })
 
@@ -101,15 +96,13 @@ func warm_batch(box_specs: Array, flat_specs: Array) -> void:
 	await get_tree().process_frame
 	await get_tree().process_frame
 
+	# Store the ViewportTexture directly — gl_compatibility's get_image() strips the
+	# alpha channel (returns RGB8), but ViewportTexture retains it natively.
+	# SubViewports are kept alive as children; UPDATE_ONCE means zero GPU cost
+	# after the first render. Memory cost ≈ 46 × 320×256 × 4 bytes ≈ 15 MB.
 	for p in pairs:
-		var vp  : SubViewport = p["vp"]
-		var img              := vp.get_texture().get_image()
-		if img == null or img.is_empty():
-			push_warning("FurnitureBaker: bake capture failed for key " + p["key"])
-			vp.queue_free()
-			continue
-		_cache[p["key"]] = ImageTexture.create_from_image(img)
-		vp.queue_free()
+		var vp : SubViewport = p["vp"]
+		_cache[p["key"]] = vp.get_texture()
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────────
@@ -123,7 +116,6 @@ func _make_viewport() -> SubViewport:
 
 
 ## Adds a closed Line2D outline around a convex polygon.
-## pts must be in order (same winding as the polygon).
 func _add_outline(target: Node2D, pts: Array, col: Color, width: float) -> void:
 	var ol := Line2D.new()
 	ol.default_color = col
@@ -158,43 +150,94 @@ func _top_lerp(pN: Vector2, pW: Vector2, pS: Vector2, pE: Vector2,
 	return lerp(lp, rp, side)
 
 
-## Draws one furniture box into target using BAKE_NV/BAKE_EV centred at BAKE_FC.
-## Design bible §1–§9: NW-light value separation, surface grain, rim highlights, AO base.
-##
-## rot (0–3): 90° CW increments — re-binds which world faces appear as the lit W / dark E
-## face without any pixel-level rotation (pre-baked separation, no distortion).
-##   rot=0: dn=NV*sn,   de=EV*se          (standard — N face, E face)
-##   rot=1: dn=EV*sn,   de=(0,16)*se      (90° CW — E face becomes N in world)
-##   rot=2: dn=-NV*sn,  de=-EV*se         (180°)
-##   rot=3: dn=-EV*sn,  de=(0,-16)*se     (270° CW)
+## Draw a simple iso box on target: 3 faces + outlines.
+## Used for sub-components (headboard, arms, shelf boards, etc.)
+## No shadow/AO/grain — those are handled by the full generic pass.
+func _bake_sub_box(target: Node2D, center: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	var up := Vector2(0.0, -h)
+	var gN := center + dn
+	var gE := center + de
+	var gS := center - dn
+	var gW := center - de
+	var ol_c := ArtPalette.cool_shadow(side_c, 0.55).darkened(0.35)
+	ol_c.a   = 0.85
+	target.add_child(_make_poly([gW, gS, gS+up, gW+up], side_c))
+	target.add_child(_make_poly([gE, gS, gS+up, gE+up],
+		ArtPalette.cool_shadow(side_c, 0.20).darkened(0.28)))
+	target.add_child(_make_poly([gN+up, gE+up, gS+up, gW+up],
+		ArtPalette.warm_highlight(top_c, 0.06).lightened(0.15)))
+	_add_outline(target, [gW, gS, gS+up, gW+up], ol_c, 1.2)
+	_add_outline(target, [gE, gS, gS+up, gE+up], ol_c, 1.2)
+	_add_outline(target, [gN+up, gE+up, gS+up, gW+up], ol_c, 1.0)
+
+
+# ── Top-level bake dispatcher ─────────────────────────────────────────────────
+
+## Dispatches to a per-type bake function.
+## rot (0–3): 90° CW increments — re-binds which faces appear as lit W / dark E.
 func _bake_box_into(target: Node2D,
 		sn: float, se: float, h: float,
-		top_c: Color, side_c: Color, rot: int = 0) -> void:
+		top_c: Color, side_c: Color, rot: int = 0,
+		type: String = "generic") -> void:
 	var c  := BAKE_FC
-	# ── Rotate the diamond axes (no pixel rotation — re-binds face identity) ─
 	var dn: Vector2
 	var de: Vector2
 	match rot:
 		1:
+			# "east" axis = map(0,+1) = screen(−32,+16)
+			# se ≤ 1: tile S-diamond vertex (0, 16*se)
+			# se > 1: first tile vertex + (se-1) full isometric S-steps
 			dn = BAKE_EV * sn
-			de = Vector2(0.0, -BAKE_NV.y) * se   # = (0, 16) * se
+			de = (Vector2(-BAKE_EV.x * (se - 1.0), -BAKE_NV.y * se)
+				if se > 1.0
+				else Vector2(0.0, -BAKE_NV.y) * se)
 		2:
+			# "east" axis = map(−1,0) = screen(−32,−16)
 			dn = -BAKE_NV * sn
-			de = -BAKE_EV * se
+			de = (Vector2(-BAKE_EV.x * se, BAKE_NV.y * (se - 1.0))
+				if se > 1.0
+				else -BAKE_EV * se)
 		3:
+			# "east" axis = map(0,−1) = screen(+32,−16)
 			dn = -BAKE_EV * sn
-			de = Vector2(0.0, BAKE_NV.y) * se    # = (0, -16) * se
-		_:  # rot=0 — default
+			de = (Vector2(BAKE_EV.x * (se - 1.0), BAKE_NV.y * se)
+				if se > 1.0
+				else Vector2(0.0, BAKE_NV.y) * se)
+		_:  # rot=0 — "east" axis = map(+1,0) = screen(+32,+16)
+			# se ≤ 1: tile E-diamond vertex (32*se, 0) — correct, no y offset
+			# se > 1: tile E-vertex + (se-1) full isometric E-steps adds y
 			dn = BAKE_NV * sn
-			de = BAKE_EV * se
+			de = (Vector2(BAKE_EV.x * se, -BAKE_NV.y * (se - 1.0))
+				if se > 1.0
+				else BAKE_EV * se)
 
+	match type:
+		"bed":      _bake_bed_into(target, c, dn, de, h, top_c, side_c)
+		"sofa":     _bake_sofa_into(target, c, dn, de, h, top_c, side_c)
+		"shelf":    _bake_shelf_into(target, c, dn, de, h, top_c, side_c)
+		"counter":  _bake_counter_into(target, c, dn, de, h, top_c, side_c)
+		"wardrobe": _bake_wardrobe_into(target, c, dn, de, h, top_c, side_c)
+		"chair":    _bake_chair_into(target, c, dn, de, h, top_c, side_c)
+		"stove":    _bake_stove_into(target, c, dn, de, h, top_c, side_c)
+		"filing":   _bake_filing_into(target, c, dn, de, h, top_c, side_c)
+		"fridge":   _bake_fridge_into(target, c, dn, de, h, top_c, side_c)
+		"dresser":  _bake_dresser_into(target, c, dn, de, h, top_c, side_c)
+		"bathtub":  _bake_bathtub_into(target, c, dn, de, h, top_c, side_c)
+		_:          _bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+
+# ── Generic furniture box ─────────────────────────────────────────────────────
+## Design bible §1–§9: NW-light value separation, surface grain, rim highlights, AO base.
+
+func _bake_generic_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
 	var up := Vector2(0.0, -h)
 	var gN := c + dn
 	var gE := c + de
 	var gS := c - dn
 	var gW := c - de
 
-	# ── Outline colour — deep navy tint per art bible (no pure black) ──────
 	var outline_col := ArtPalette.cool_shadow(side_c, 0.55).darkened(0.35)
 	outline_col.a   = 0.85
 
@@ -221,9 +264,8 @@ func _bake_box_into(target: Node2D,
 	ao_e.add_point(gE);  ao_e.add_point(gS)
 	target.add_child(ao_e)
 
-	# ── 3. W face — lit side (NW light, design bible: baseline value) ──────
+	# ── 3. W face — lit side ──────────────────────────────────────────────
 	target.add_child(_make_poly([gW, gS, gS + up, gW + up], side_c))
-	# Vertical grain on W face (subtle, deterministic).
 	var wg_n := max(1, int(de.length() / 10.0))
 	for i in range(1, wg_n + 1):
 		var t  := float(i) / float(wg_n + 1)
@@ -233,22 +275,17 @@ func _bake_box_into(target: Node2D,
 		wg.add_point(lerp(gW, gS, t))
 		wg.add_point(lerp(gW + up, gS + up, t))
 		target.add_child(wg)
-	# W face outline.
 	_add_outline(target, [gW, gS, gS + up, gW + up], outline_col, 1.2)
 
-	# ── 4. E face — dark side (away from NW light, cool shadow) ───────────
-	# Contrast increased vs previous (was cool_shadow 0.12 + darkened 0.18)
-	# to match the ~30% face separation visible in the hand-drawn sprite sheets.
+	# ── 4. E face — dark side ─────────────────────────────────────────────
 	target.add_child(_make_poly(
 			[gE, gS, gS + up, gE + up],
 			ArtPalette.cool_shadow(side_c, 0.20).darkened(0.28)))
-	# E face outline.
 	_add_outline(target, [gE, gS, gS + up, gE + up], outline_col, 1.2)
 
-	# ── 5. Top face — warm, +15% brightness (design bible §9) ─────────────
+	# ── 5. Top face — warm highlight + cross-grain ────────────────────────
 	var lit_top := ArtPalette.warm_highlight(top_c, 0.06).lightened(0.15)
 	target.add_child(_make_poly([gN + up, gE + up, gS + up, gW + up], lit_top))
-	# Cross-grain lines on top face (N→S parameterisation).
 	var tg_n := max(1, int(dn.length() * 2.0 / 5.0))
 	for i in range(1, tg_n + 1):
 		var t  := float(i) / float(tg_n + 1)
@@ -258,30 +295,437 @@ func _bake_box_into(target: Node2D,
 		tg.add_point(_top_lerp(gN + up, gW + up, gS + up, gE + up, t, 0.0))
 		tg.add_point(_top_lerp(gN + up, gW + up, gS + up, gE + up, t, 1.0))
 		target.add_child(tg)
-	# Top face outline — slightly lighter than side outlines.
-	var top_outline_col := ArtPalette.cool_shadow(top_c, 0.40).darkened(0.25)
-	top_outline_col.a = 0.70
-	_add_outline(target, [gN + up, gE + up, gS + up, gW + up], top_outline_col, 1.0)
+	var top_ol := ArtPalette.cool_shadow(top_c, 0.40).darkened(0.25)
+	top_ol.a = 0.70
+	_add_outline(target, [gN + up, gE + up, gS + up, gW + up], top_ol, 1.0)
 
-	# ── 6. Rim highlights on top edges ────────────────────────────────────
-	# NW edge: brightest (faces light source directly).
+	# ── 6. Rim highlights ─────────────────────────────────────────────────
 	var nw_rim := Line2D.new()
 	nw_rim.default_color = ArtPalette.warm_highlight(top_c, 0.10).lightened(0.28)
 	nw_rim.width = 1.0
 	nw_rim.add_point(gN + up);  nw_rim.add_point(gW + up)
 	target.add_child(nw_rim)
-	# NE edge: medium highlight.
 	var ne_rim := Line2D.new()
 	ne_rim.default_color = ArtPalette.warm_highlight(top_c, 0.06).lightened(0.18)
 	ne_rim.width = 1.0
 	ne_rim.add_point(gN + up);  ne_rim.add_point(gE + up)
 	target.add_child(ne_rim)
-	# SW edge: front bevel (most visible to camera).
 	var bevel := Line2D.new()
 	bevel.default_color = ArtPalette.warm_highlight(top_c, 0.08).lightened(0.24)
 	bevel.width = 1.0
 	bevel.add_point(gS + up);  bevel.add_point(gW + up)
 	target.add_child(bevel)
+
+
+# ── Per-type baking functions ─────────────────────────────────────────────────
+
+## BED: headboard + footboard + pillow + mattress seams + leg stubs.
+## Custom draw order for correct isometric layering:
+##   shadow → headboard (behind) → mattress → footboard (front) → pillow → legs.
+func _bake_bed_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	var up := Vector2(0.0, -h)
+	var gN := c + dn;  var gE := c + de
+	var gS := c - dn;  var gW := c - de
+
+	# 1. Contact shadow
+	var sh_col := ArtPalette.cool_shadow(ArtPalette.SHADOW_BASE, 0.65);  sh_col.a = 0.28
+	var sh_pts : Array[Vector2] = []
+	var sh_rh  := max(5.0, de.length() * 0.55);  var sh_rv := max(2.5, dn.length() * 0.28)
+	for i in 10:
+		var a := TAU * float(i) / 10.0
+		sh_pts.append(c + Vector2(3.0, 5.0) + Vector2(cos(a)*sh_rh, sin(a)*sh_rv))
+	target.add_child(_make_poly(sh_pts, sh_col))
+
+	# 2. Headboard — dark wood, taller, N end (rendered BEHIND mattress)
+	var wood := ArtPalette.FURN_WOOD_DARK
+	_bake_sub_box(target, c + dn*0.65, dn*0.35, de, h*1.85,
+		wood.lightened(0.07), wood)
+
+	# 3. Mattress — full dims
+	var ol_c := ArtPalette.cool_shadow(side_c, 0.55).darkened(0.35);  ol_c.a = 0.85
+	var ao   := ArtPalette.cool_shadow(side_c, 0.40);  ao.a = 0.38
+	var aow  := Line2D.new();  aow.default_color = ao;  aow.width = 2.5
+	aow.add_point(gW);  aow.add_point(gS);  target.add_child(aow)
+	var aoe  := Line2D.new();  aoe.default_color = ao;  aoe.width = 2.5
+	aoe.add_point(gE);  aoe.add_point(gS);  target.add_child(aoe)
+	target.add_child(_make_poly([gW, gS, gS+up, gW+up], side_c))
+	target.add_child(_make_poly([gE, gS, gS+up, gE+up],
+		ArtPalette.cool_shadow(side_c, 0.20).darkened(0.28)))
+	_add_outline(target, [gW, gS, gS+up, gW+up], ol_c, 1.2)
+	_add_outline(target, [gE, gS, gS+up, gE+up], ol_c, 1.2)
+	var lit_top := ArtPalette.warm_highlight(top_c, 0.06).lightened(0.15)
+	target.add_child(_make_poly([gN+up, gE+up, gS+up, gW+up], lit_top))
+	var top_ol := ArtPalette.cool_shadow(top_c, 0.40).darkened(0.25);  top_ol.a = 0.70
+	_add_outline(target, [gN+up, gE+up, gS+up, gW+up], top_ol, 1.0)
+	# Mattress seam lines (2 horizontal folds)
+	var seam_c := Color(top_c.darkened(0.22), 0.45)
+	for t in [0.30, 0.68]:
+		var sl := Line2D.new();  sl.default_color = seam_c;  sl.width = 1.0
+		sl.add_point(_top_lerp(gN+up, gW+up, gS+up, gE+up, t, 0.12))
+		sl.add_point(_top_lerp(gN+up, gW+up, gS+up, gE+up, t, 0.88))
+		target.add_child(sl)
+
+	# 4. Footboard — shorter, S end (drawn after mattress = rendered in front)
+	_bake_sub_box(target, c - dn*0.78, dn*0.22, de, h*0.55,
+		wood.lightened(0.05), wood)
+
+	# 5. Pillow — bone-white flat diamond near N end of mattress top
+	var pi_c := c + dn*0.36 + Vector2(0.0, -h - 0.8)
+	var pi_d := dn*0.25;  var pi_e := de*0.60
+	var pi_col := ArtPalette.warm_highlight(ArtPalette.BONE_WHITE, 0.04)
+	target.add_child(_make_poly([pi_c+pi_d, pi_c+pi_e, pi_c-pi_d, pi_c-pi_e], pi_col))
+	_add_outline(target, [pi_c+pi_d, pi_c+pi_e, pi_c-pi_d, pi_c-pi_e],
+		Color(ArtPalette.FURN_WOOD_SOFT.darkened(0.30), 0.42), 0.8)
+
+	# 6. Leg stubs at diamond corners
+	var leg_c := Color(wood.darkened(0.40), 0.55)
+	for corner: Vector2 in [gN, gE, gS, gW]:
+		var lg := Line2D.new();  lg.default_color = leg_c;  lg.width = 2.5
+		lg.add_point(corner);  lg.add_point(corner + Vector2(0.0, 4.0))
+		target.add_child(lg)
+
+
+## SOFA: call generic (seat body), then add back panel, arms, cushion divider.
+func _bake_sofa_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	# Back panel: darker, slightly taller, N end (25% depth)
+	var bk_c := side_c.darkened(0.18)
+	_bake_sub_box(target, c + dn*0.76, dn*0.24, de, h*1.06,
+		bk_c.lightened(0.05), bk_c)
+
+	# Left arm: W end, 16% width, 80% height
+	var arm_c := side_c.darkened(0.10)
+	_bake_sub_box(target, c - de*0.84, dn, de*0.16, h*0.80,
+		arm_c.lightened(0.04), arm_c)
+
+	# Right arm: E end, 16% width, 80% height
+	_bake_sub_box(target, c + de*0.84, dn, de*0.16, h*0.80,
+		arm_c.lightened(0.04), arm_c)
+
+	# Cushion division line on seat top
+	var gN := c+dn;  var gE := c+de;  var gS := c-dn;  var gW := c-de
+	var up  := Vector2(0.0, -h)
+	var div := Line2D.new();  div.default_color = Color(side_c.darkened(0.38), 0.55);  div.width = 1.2
+	div.add_point(_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.50, 0.16))
+	div.add_point(_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.50, 0.84))
+	target.add_child(div)
+
+
+## SHELF: call generic (frame), then add shelf boards as horizontal lines + thin top-faces.
+func _bake_shelf_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gW := c - de;  var gS := c - dn;  var gE := c + de
+	var board_edge_c := Color(ArtPalette.warm_highlight(top_c, 0.08).lightened(0.14), 0.80)
+	var board_top_c  := ArtPalette.warm_highlight(top_c, 0.10).lightened(0.16)
+
+	for t in [0.25, 0.55, 0.82]:
+		# Front edge of board on W face
+		var wl := Line2D.new();  wl.default_color = board_edge_c;  wl.width = 1.5
+		wl.add_point(gW + Vector2(0.0, -h*t))
+		wl.add_point(gS + Vector2(0.0, -h*t))
+		target.add_child(wl)
+		# Front edge on E face (slightly darker)
+		var el := Line2D.new();  el.default_color = Color(board_edge_c.darkened(0.15), 0.60);  el.width = 1.5
+		el.add_point(gE + Vector2(0.0, -h*t))
+		el.add_point(gS + Vector2(0.0, -h*t))
+		target.add_child(el)
+		# Board top-face diamond (thin flat)
+		var bt_ctr := c + Vector2(0.0, -h*t - 1.5)
+		var bt_dn  := dn * 0.80;  var bt_de := de * 0.80
+		target.add_child(_make_poly(
+			[bt_ctr+bt_dn, bt_ctr+bt_de, bt_ctr-bt_dn, bt_ctr-bt_de], board_top_c))
+
+
+## COUNTER: call generic, then add cabinet dividers + handle bar on front face.
+func _bake_counter_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gW := c - de;  var gS := c - dn;  var up := Vector2(0.0, -h)
+	var door_c   := Color(side_c.darkened(0.26), 0.62)
+	var handle_c := Color(top_c.lightened(0.28), 0.82)
+
+	# Cabinet dividers (vertical lines on W face)
+	for f in [0.34, 0.67]:
+		var dv := Line2D.new();  dv.default_color = door_c;  dv.width = 1.0
+		dv.add_point(lerp(gW, gS, f))
+		dv.add_point(lerp(gW, gS, f) + up)
+		target.add_child(dv)
+
+	# Handle bar at 35% height
+	var hl := Line2D.new();  hl.default_color = handle_c;  hl.width = 1.5
+	hl.add_point(lerp(gW, gS, 0.14) + Vector2(0.0, -h*0.35))
+	hl.add_point(lerp(gW, gS, 0.86) + Vector2(0.0, -h*0.35))
+	target.add_child(hl)
+
+	# Front panel recess: slightly darker strip at bottom of W face
+	var panel_c := Color(side_c.darkened(0.18), 0.50)
+	target.add_child(_make_poly([
+		gW + Vector2(0.0, -h*0.02), gS + Vector2(0.0, -h*0.02),
+		gS + Vector2(0.0, -h*0.28), gW + Vector2(0.0, -h*0.28)
+	], panel_c))
+
+
+## WARDROBE: call generic, then add door seam, handles, top moulding.
+func _bake_wardrobe_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gN := c+dn;  var gE := c+de;  var gS := c-dn;  var gW := c-de
+	var up  := Vector2(0.0, -h)
+	var seam_c   := Color(side_c.darkened(0.30), 0.72)
+	var handle_c := Color(top_c.lightened(0.30), 0.86)
+	var mould_c  := Color(side_c.lightened(0.24), 0.68)
+
+	# Centre door seam (vertical midline of W face)
+	var sm := Line2D.new();  sm.default_color = seam_c;  sm.width = 1.0
+	sm.add_point(lerp(gW, gS, 0.50))
+	sm.add_point(lerp(gW+up, gS+up, 0.50))
+	target.add_child(sm)
+
+	# Door handles (small circles at 25% and 75% on W face, at mid-height)
+	for f: float in [0.25, 0.75]:
+		var hpos := gW.lerp(gS, f) + Vector2(0.0, -h*0.46)
+		var h_pts : Array[Vector2] = []
+		for i in 8:
+			var a := TAU * float(i) / 8.0
+			h_pts.append(hpos + Vector2(cos(a)*2.2, sin(a)*1.4))
+		target.add_child(_make_poly(h_pts, handle_c))
+
+	# Top moulding: bright line along NW and NE top edges
+	var m1 := Line2D.new();  m1.default_color = mould_c;  m1.width = 2.0
+	m1.add_point(gN+up);  m1.add_point(gW+up)
+	target.add_child(m1)
+	var m2 := Line2D.new();  m2.default_color = mould_c;  m2.width = 2.0
+	m2.add_point(gN+up);  m2.add_point(gE+up)
+	target.add_child(m2)
+
+
+## CHAIR: call generic (body), then add prominent back rest.
+func _bake_chair_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	# Back rest: thin, taller, N end — clearly visible above seat
+	_bake_sub_box(target, c + dn*0.78, dn*0.22, de*0.78, h*1.40,
+		side_c.darkened(0.10), side_c.darkened(0.08))
+
+	# Leg stubs at E, S, W corners (N is hidden by back rest)
+	var leg_c := Color(side_c.darkened(0.40), 0.58)
+	for corner: Vector2 in [c+de, c-dn, c-de]:
+		var lg := Line2D.new();  lg.default_color = leg_c;  lg.width = 2.0
+		lg.add_point(corner);  lg.add_point(corner + Vector2(0.0, 3.5))
+		target.add_child(lg)
+
+
+## STOVE: call generic, then add 4 burner rings + control knobs + oven seam.
+func _bake_stove_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var up := Vector2(0.0, -h)
+	var gN := c+dn;  var gE := c+de;  var gS := c-dn;  var gW := c-de
+	var burner_c := Color(side_c.darkened(0.48), 0.88)
+	var inner_c  := Color(side_c.darkened(0.22), 0.70)
+
+	# 4 burner rings on top face (2×2 grid)
+	var burner_pos := [
+		_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.28, 0.28),
+		_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.28, 0.72),
+		_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.72, 0.28),
+		_top_lerp(gN+up, gW+up, gS+up, gE+up, 0.72, 0.72),
+	]
+	for bpos: Vector2 in burner_pos:
+		var rpts : Array[Vector2] = []
+		for i in 10:
+			var a := TAU * float(i) / 10.0
+			rpts.append(bpos + Vector2(cos(a)*3.5, sin(a)*2.0))
+		target.add_child(_make_poly(rpts, burner_c))
+		var ipts : Array[Vector2] = []
+		for i in 10:
+			var a := TAU * float(i) / 10.0
+			ipts.append(bpos + Vector2(cos(a)*1.8, sin(a)*1.0))
+		target.add_child(_make_poly(ipts, inner_c))
+
+	# Control knobs on front W face (3 dots)
+	var knob_c := Color(top_c.lightened(0.22), 0.82)
+	for k in 3:
+		var f    := (float(k) + 1.0) / 4.0
+		var kpos := gW.lerp(gS, f) + Vector2(0.0, -h*0.32)
+		var kpts : Array[Vector2] = []
+		for i in 7:
+			var a := TAU * float(i) / 7.0
+			kpts.append(kpos + Vector2(cos(a)*2.0, sin(a)*1.2))
+		target.add_child(_make_poly(kpts, knob_c))
+
+	# Oven door seam line
+	var dsm := Line2D.new();  dsm.default_color = Color(side_c.darkened(0.32), 0.66);  dsm.width = 1.0
+	dsm.add_point(lerp(gW, gS, 0.08) + Vector2(0.0, -h*0.55))
+	dsm.add_point(lerp(gW, gS, 0.92) + Vector2(0.0, -h*0.55))
+	target.add_child(dsm)
+
+
+## FILING CABINET: call generic, then add 3 drawer seams + handles + label strips.
+func _bake_filing_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gW := c - de;  var gS := c - dn;  var gE := c + de
+	var drawer_c := Color(side_c.darkened(0.22), 0.72)
+	var handle_c := Color(top_c.lightened(0.38), 0.82)
+	var label_c  := Color(ArtPalette.BONE_WHITE, 0.28)
+
+	for d in 3:
+		var t := float(d + 1) / 4.0   # at 25%, 50%, 75% of height
+		# Seam line on W face
+		var sw := Line2D.new();  sw.default_color = drawer_c;  sw.width = 1.0
+		sw.add_point(lerp(gW, gS, 0.04) + Vector2(0.0, -h*t))
+		sw.add_point(lerp(gW, gS, 0.96) + Vector2(0.0, -h*t))
+		target.add_child(sw)
+		# Seam line on E face (slightly fainter)
+		var se2 := Line2D.new();  se2.default_color = Color(drawer_c.darkened(0.12), 0.55);  se2.width = 1.0
+		se2.add_point(lerp(gE, gS, 0.04) + Vector2(0.0, -h*t))
+		se2.add_point(lerp(gE, gS, 0.96) + Vector2(0.0, -h*t))
+		target.add_child(se2)
+		# Handle dot at mid-height of each drawer
+		var hpos := gW.lerp(gS, 0.50) + Vector2(0.0, -h*(t - 0.12))
+		var hpts : Array[Vector2] = []
+		for i in 7:
+			var a := TAU * float(i) / 7.0
+			hpts.append(hpos + Vector2(cos(a)*2.5, sin(a)*1.5))
+		target.add_child(_make_poly(hpts, handle_c))
+		# Label strip (thin lighter rect on upper drawer front)
+		target.add_child(_make_poly([
+			lerp(gW, gS, 0.10) + Vector2(0.0, -h*(t - 0.04)),
+			lerp(gW, gS, 0.90) + Vector2(0.0, -h*(t - 0.04)),
+			lerp(gW, gS, 0.90) + Vector2(0.0, -h*(t - 0.14)),
+			lerp(gW, gS, 0.10) + Vector2(0.0, -h*(t - 0.14)),
+		], label_c))
+
+
+## FRIDGE: tall appliance — door seal seam + recessed handle bar + ice-maker panel.
+func _bake_fridge_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gW := c - de;  var gS := c - dn;  var gE := c + de
+	var up  := Vector2(0.0, -h)
+	var seam_c   := Color(side_c.darkened(0.28), 0.75)
+	var handle_c := Color(top_c.lightened(0.32), 0.88)
+	var panel_c  := Color(side_c.darkened(0.16), 0.42)
+
+	# Door seam: horizontal line dividing freezer (top ~30%) from fridge body
+	var dsm := Line2D.new();  dsm.default_color = seam_c;  dsm.width = 1.2
+	dsm.add_point(lerp(gW, gS, 0.04) + Vector2(0.0, -h*0.70))
+	dsm.add_point(lerp(gW, gS, 0.96) + Vector2(0.0, -h*0.70))
+	target.add_child(dsm)
+	# Same seam on E face
+	var dsm_e := Line2D.new();  dsm_e.default_color = Color(seam_c.darkened(0.12), 0.55);  dsm_e.width = 1.2
+	dsm_e.add_point(lerp(gE, gS, 0.04) + Vector2(0.0, -h*0.70))
+	dsm_e.add_point(lerp(gE, gS, 0.96) + Vector2(0.0, -h*0.70))
+	target.add_child(dsm_e)
+
+	# Recessed handle bar (near N edge on W face, vertical, at ~45% height)
+	var hl := Line2D.new();  hl.default_color = handle_c;  hl.width = 2.5
+	hl.add_point(lerp(gW, gS, 0.14) + Vector2(0.0, -h*0.36))
+	hl.add_point(lerp(gW, gS, 0.14) + Vector2(0.0, -h*0.58))
+	target.add_child(hl)
+
+	# Freezer handle bar (same position on freezer section)
+	var hl2 := Line2D.new();  hl2.default_color = handle_c;  hl2.width = 2.5
+	hl2.add_point(lerp(gW, gS, 0.14) + Vector2(0.0, -h*0.76))
+	hl2.add_point(lerp(gW, gS, 0.14) + Vector2(0.0, -h*0.88))
+	target.add_child(hl2)
+
+	# Ice-maker panel: small darker inset on upper-left of main fridge face
+	target.add_child(_make_poly([
+		lerp(gW, gS, 0.52) + Vector2(0.0, -h*0.10),
+		lerp(gW, gS, 0.90) + Vector2(0.0, -h*0.10),
+		lerp(gW, gS, 0.90) + Vector2(0.0, -h*0.30),
+		lerp(gW, gS, 0.52) + Vector2(0.0, -h*0.30),
+	], panel_c))
+
+
+## DRESSER: generic frame + horizontal drawer seam lines + small handle pair per drawer.
+func _bake_dresser_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var gW := c - de;  var gS := c - dn;  var gE := c + de
+	var drawer_c := Color(side_c.darkened(0.24), 0.68)
+	var handle_c := Color(top_c.lightened(0.34), 0.84)
+
+	# 4 drawer seam lines on W face (divides height evenly)
+	for d in 4:
+		var t := float(d + 1) / 5.0
+		var sl := Line2D.new();  sl.default_color = drawer_c;  sl.width = 1.0
+		sl.add_point(lerp(gW, gS, 0.04) + Vector2(0.0, -h*t))
+		sl.add_point(lerp(gW, gS, 0.96) + Vector2(0.0, -h*t))
+		target.add_child(sl)
+		# Faint seam on E face
+		var el := Line2D.new();  el.default_color = Color(drawer_c.darkened(0.14), 0.45);  el.width = 1.0
+		el.add_point(lerp(gE, gS, 0.04) + Vector2(0.0, -h*t))
+		el.add_point(lerp(gE, gS, 0.96) + Vector2(0.0, -h*t))
+		target.add_child(el)
+		# Two small handle dots per drawer (at 35% and 65% along face)
+		for f: float in [0.35, 0.65]:
+			var hpos := gW.lerp(gS, f) + Vector2(0.0, -h*(t - 0.10))
+			var hpts : Array[Vector2] = []
+			for i in 6:
+				var a := TAU * float(i) / 6.0
+				hpts.append(hpos + Vector2(cos(a)*1.8, sin(a)*1.2))
+			target.add_child(_make_poly(hpts, handle_c))
+
+
+## BATHTUB: low flat box with recessed inner well + faucet stub at N end.
+func _bake_bathtub_into(target: Node2D, c: Vector2, dn: Vector2, de: Vector2,
+		h: float, top_c: Color, side_c: Color) -> void:
+	_bake_generic_into(target, c, dn, de, h, top_c, side_c)
+
+	var up := Vector2(0.0, -h)
+	var gN := c+dn;  var gE := c+de;  var gS := c-dn;  var gW := c-de
+	var well_c   := Color(side_c.darkened(0.32), 0.70)   # inner well floor
+	var rim_c    := Color(top_c.lightened(0.22), 0.78)   # rim highlights
+	var faucet_c := Color(ArtPalette.BONE_WHITE.darkened(0.20), 0.85)
+
+	# Inner well: inset flat diamond at top face (85% scale, slightly sunken)
+	var inset := 0.82
+	var wN := c + dn*inset + up;  var wE := c + de*inset + up
+	var wS := c - dn*inset + up;  var wW := c - de*inset + up
+	target.add_child(_make_poly([wN, wE, wS, wW], well_c))
+
+	# Rim outline around the inner well
+	var rl := Line2D.new();  rl.default_color = Color(rim_c, 0.65);  rl.width = 1.2
+	rl.closed = true
+	rl.add_point(wN);  rl.add_point(wE);  rl.add_point(wS);  rl.add_point(wW)
+	target.add_child(rl)
+
+	# Drain circle near S end of well
+	var drain_p := c - dn*0.50 + up
+	var dpts : Array[Vector2] = []
+	for i in 8:
+		var a := TAU * float(i) / 8.0
+		dpts.append(drain_p + Vector2(cos(a)*2.0, sin(a)*1.2))
+	target.add_child(_make_poly(dpts, well_c.darkened(0.30)))
+
+	# Faucet stub at N end: small bright rectangle rising from rim
+	var fpos := c + dn*0.76 + up
+	var fdn  := dn * 0.10;  var fde := de * 0.08
+	target.add_child(_make_poly(
+		[fpos+fdn, fpos+fde, fpos-fdn, fpos-fde], faucet_c))
+	# Faucet handles (two small nubs left/right)
+	for side: float in [-1.0, 1.0]:
+		var hbase := fpos + de * side * 0.22
+		var hpts : Array[Vector2] = []
+		for i in 6:
+			var a := TAU * float(i) / 6.0
+			hpts.append(hbase + Vector2(cos(a)*1.4, sin(a)*0.9))
+		target.add_child(_make_poly(hpts, faucet_c.darkened(0.14)))
 
 
 ## Draws one flat rhombus into target at BAKE_FC.

@@ -63,8 +63,8 @@ func _bake_static(map_data: MapData) -> void:
 			_static_img.set_pixel(tx, ty, _tile_color(map_data.get_tile(tx, ty)))
 
 	# Darken building footprints
-	for bd in map_data.buildings:
-		var r: Rect2i = bd.tile_rect
+	for bd in map_data.building_blueprints:
+		var r: Rect2i = bd.bounds
 		for by in range(r.position.y, r.end.y):
 			for bx in range(r.position.x, r.end.x):
 				if bx >= 0 and bx < MAP_W and by >= 0 and by < MAP_H:

@@ -67,13 +67,35 @@ func _draw_prop(ctr: Vector2, ptype: int, tpos: Vector2i, hw: float, hh: float) 
 
 		MapData.PROP_TRASH_CAN:
 			_prop_shadow(ctr, hw * 0.20, hh * 0.14, 0.28)
-			var c := Color(0.22, 0.24, 0.20)
-			_iso_box(ctr, 0.15, 10.0,
+			var c    := Color(0.22, 0.24, 0.20)
+			var s_tc := 0.15
+			var h_tc := 10.0
+			_iso_box(ctr, s_tc, h_tc,
 					c.lightened(0.08), c, ArtPalette.cool_shadow(c, 0.12).darkened(0.18), hw, hh)
-			draw_line(
-					ctr + Vector2(-hw * 0.15, -10.0),
-					ctr + Vector2( hw * 0.15, -10.0),
-					c.lightened(0.24), 1.0)
+			# Lid — flat diamond overhanging the box by ~2px per side
+			var lid_s   := s_tc + 0.025
+			var lid_top := ctr + Vector2(0.0, -h_tc - 1.0)
+			var lid_c   := c.lightened(0.16)
+			draw_colored_polygon(PackedVector2Array([
+				lid_top + Vector2(  0.0,      -hh * lid_s),
+				lid_top + Vector2( hw * lid_s,  0.0),
+				lid_top + Vector2(  0.0,       hh * lid_s),
+				lid_top + Vector2(-hw * lid_s,  0.0),
+			]), lid_c)
+			draw_polyline(PackedVector2Array([
+				lid_top + Vector2(  0.0,      -hh * lid_s),
+				lid_top + Vector2( hw * lid_s,  0.0),
+				lid_top + Vector2(  0.0,       hh * lid_s),
+				lid_top + Vector2(-hw * lid_s,  0.0),
+				lid_top + Vector2(  0.0,      -hh * lid_s),
+			]), c.darkened(0.36), 0.8, true)
+			# Side handle on W face at mid height
+			var h_mid    := h_tc * 0.55
+			var gW_tc    := ctr + Vector2(-hw * s_tc,  0.0)
+			var gS_tc    := ctr + Vector2(  0.0,       hh * s_tc)
+			var handle_l := lerp(gW_tc - Vector2(0, h_mid), gS_tc - Vector2(0, h_mid), 0.20)
+			var handle_r := lerp(gW_tc - Vector2(0, h_mid), gS_tc - Vector2(0, h_mid), 0.65)
+			draw_line(handle_l, handle_r, c.lightened(0.30), 1.8)
 
 		MapData.PROP_DUMPSTER:
 			_prop_shadow(ctr, hw * 0.44, hh * 0.22, 0.30)
@@ -82,15 +104,19 @@ func _draw_prop(ctr: Vector2, ptype: int, tpos: Vector2i, hw: float, hh: float) 
 			var h_d := 16.0
 			_iso_box(ctr, s_d, h_d,
 					c.lightened(0.06), c.lightened(0.04), ArtPalette.cool_shadow(c, 0.14).darkened(0.20), hw, hh)
-			draw_line(
-					ctr + Vector2(  0.0,     -hh * s_d - h_d),
-					ctr + Vector2( hw * s_d,             -h_d),
-					c.lightened(0.30), 1.5)
+			var gN_d := ctr + Vector2(  0.0,      -hh * s_d)
+			var gE_d := ctr + Vector2( hw * s_d,   0.0)
+			var gS_d := ctr + Vector2(  0.0,       hh * s_d)
+			var gW_d := ctr + Vector2(-hw * s_d,   0.0)
+			# Rib lines on E and W faces at 40% height
 			var rib_h := h_d * 0.40
-			draw_line(
-					ctr + Vector2( hw * s_d, -rib_h),
-					ctr + Vector2(  0.0,  hh * s_d - rib_h),
-					c.darkened(0.30), 1.0)
+			draw_line(gE_d - Vector2(0, rib_h), gS_d - Vector2(0, rib_h), c.darkened(0.30), 1.0)
+			draw_line(gW_d - Vector2(0, rib_h), gS_d - Vector2(0, rib_h), c.darkened(0.26), 0.8)
+			# Lid N-S seam across top face
+			draw_line(gN_d - Vector2(0, h_d), gS_d - Vector2(0, h_d), c.lightened(0.32), 1.5)
+			# Wheel bumps at lower-front corners
+			draw_circle(lerp(gW_d, gS_d, 0.65), 3.0, Color(0.16, 0.16, 0.14))
+			draw_circle(lerp(gE_d, gS_d, 0.65), 3.0, Color(0.16, 0.16, 0.14))
 
 		MapData.PROP_MAILBOX:
 			_prop_shadow(ctr, hw * 0.18, hh * 0.12, 0.24)
@@ -247,20 +273,32 @@ func _draw_prop(ctr: Vector2, ptype: int, tpos: Vector2i, hw: float, hh: float) 
 
 		MapData.PROP_CRATE:
 			_prop_shadow(ctr, hw * 0.32, hh * 0.18, 0.28)
-			var w   := ArtPalette.FURN_WOOD_SOFT
-			var s_c := 0.28
-			var h_c := 10.0
+			var w    := ArtPalette.FURN_WOOD_SOFT
+			var s_c  := 0.28
+			var h_c  := 10.0
+			var gN_c := ctr + Vector2(  0.0,     -hh * s_c)
+			var gE_c := ctr + Vector2( hw * s_c,  0.0)
+			var gS_c := ctr + Vector2(  0.0,      hh * s_c)
+			var gW_c := ctr + Vector2(-hw * s_c,  0.0)
 			_iso_box(ctr, s_c, h_c,
 					ArtPalette.warm_highlight(w, 0.06).lightened(0.06),
 					w, ArtPalette.cool_shadow(w, 0.14).darkened(0.18), hw, hh)
-			draw_line(ctr + Vector2(  0.0, -hh * s_c - h_c),
-					  ctr + Vector2(  0.0,  hh * s_c - h_c), w.darkened(0.28), 1.0)
-			draw_line(ctr + Vector2(-hw * s_c, -h_c),
-					  ctr + Vector2( hw * s_c, -h_c), w.darkened(0.28), 1.0)
-			draw_line(ctr + Vector2(-hw * s_c,  0.0),
-					  ctr + Vector2(-hw * s_c, -h_c), w.darkened(0.32), 0.8)
-			draw_line(ctr + Vector2(  0.0,  hh * s_c),
-					  ctr + Vector2(  0.0,  hh * s_c - h_c), w.darkened(0.32), 0.8)
+			# Cross-brace on top face
+			draw_line(gN_c - Vector2(0, h_c), gS_c - Vector2(0, h_c), w.darkened(0.28), 1.0)
+			draw_line(gW_c - Vector2(0, h_c), gE_c - Vector2(0, h_c), w.darkened(0.28), 1.0)
+			# Vertical corner posts on W and E faces
+			draw_line(gW_c, gW_c - Vector2(0, h_c), w.darkened(0.32), 0.8)
+			draw_line(gS_c, gS_c - Vector2(0, h_c), w.darkened(0.32), 0.8)
+			# Horizontal plank lines on W and E faces
+			for pt in [0.33, 0.67]:
+				var py : float = h_c * pt
+				draw_line(gW_c - Vector2(0, py), gS_c - Vector2(0, py), w.darkened(0.22), 0.8)
+				draw_line(gE_c - Vector2(0, py), gS_c - Vector2(0, py), w.darkened(0.22), 0.8)
+			# Iron bolt circles at top corners
+			var iron_c := Color(0.26, 0.22, 0.18)
+			for corn: Vector2 in [gN_c - Vector2(0, h_c), gE_c - Vector2(0, h_c),
+								  gS_c - Vector2(0, h_c), gW_c - Vector2(0, h_c)]:
+				draw_circle(corn, 1.2, iron_c)
 
 		MapData.PROP_BARREL:
 			_prop_shadow(ctr, hw * 0.22, hh * 0.14, 0.26)
@@ -270,14 +308,15 @@ func _draw_prop(ctr: Vector2, ptype: int, tpos: Vector2i, hw: float, hh: float) 
 			_iso_box(ctr, s_b, h_b,
 					ArtPalette.warm_highlight(b, 0.04).lightened(0.04),
 					b, ArtPalette.cool_shadow(b, 0.14).darkened(0.14), hw, hh)
+			# Metal bands at 3 heights on W and E faces
 			var band_c := Color(0.46, 0.38, 0.18)
-			var band_y := h_b * 0.42
-			draw_line(ctr + Vector2( hw * s_b,        -band_y),
-					  ctr + Vector2(  0.0,   hh * s_b - band_y), band_c, 1.5)
-			draw_line(ctr + Vector2(-hw * s_b,        -band_y),
-					  ctr + Vector2(  0.0,   hh * s_b - band_y), band_c, 1.5)
-			draw_line(ctr + Vector2(-hw * s_b, -h_b),
-					  ctr + Vector2( hw * s_b, -h_b), band_c, 1.0)
+			for band_y in [h_b * 0.18, h_b * 0.50, h_b * 0.84]:
+				draw_line(ctr + Vector2(-hw * s_b,        -band_y),
+						  ctr + Vector2(  0.0,   hh * s_b - band_y), band_c, 1.5)
+				draw_line(ctr + Vector2( hw * s_b,        -band_y),
+						  ctr + Vector2(  0.0,   hh * s_b - band_y), band_c, 1.5)
+			# Top bung: small dark circle at crown centre
+			draw_circle(ctr + Vector2(0.0, -h_b), 2.0, b.darkened(0.38))
 
 		MapData.PROP_FIRE_HYDRANT:
 			_prop_shadow(ctr, hw * 0.22, hh * 0.14, 0.26)

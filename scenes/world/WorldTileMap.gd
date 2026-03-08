@@ -16,10 +16,53 @@ static var TILE_COLORS: Array[Color] = [
 
 var _map_data: MapData = null
 
+## Pre-computed grass blade vertex pairs — batched for single draw_multiline() call.
+var _grass_blades_light : PackedVector2Array = PackedVector2Array()
+var _grass_blades_mid   : PackedVector2Array = PackedVector2Array()
+
 
 func setup_from_map_data(data: MapData) -> void:
 	_map_data = data
+	_precompute_grass()
 	queue_redraw()
+
+
+## Pre-computes grass blade line segments into two colour-grouped arrays.
+## Called once at setup — zero per-frame cost after first draw.
+func _precompute_grass() -> void:
+	_grass_blades_light.clear()
+	_grass_blades_mid.clear()
+	if _map_data == null:
+		return
+	var hw := TILE_W * 0.5
+	var hh := TILE_H * 0.5
+	for ty in _map_data.map_height:
+		for tx in _map_data.map_width:
+			if _map_data.get_tile(tx, ty) != MapData.TILE_GRASS:
+				continue
+			var cell := Vector2i(tx, ty) + _map_data.origin_offset
+			var ctr  := map_to_local(cell)
+			var rng  := RandomNumberGenerator.new()
+			rng.seed = tx * 6271 + ty * 3571
+			var n_blades := rng.randi_range(3, 5)
+			for _i in n_blades:
+				# Rejection sample inside diamond (max 3 attempts; ~50% accept per try)
+				var bx := 0.0;  var by := 0.0
+				for _a in 3:
+					bx = rng.randf_range(-hw * 0.80, hw * 0.80)
+					by = rng.randf_range(-hh * 0.80, hh * 0.80)
+					if absf(bx) / hw + absf(by) / hh <= 0.80:
+						break
+				var base   := ctr + Vector2(bx, by)
+				var angle  := rng.randf_range(-0.55, 0.55)
+				var length := rng.randf_range(3.2, 5.8)
+				var tip    := base + Vector2(sin(angle) * length * 0.35, -length)
+				if rng.randi() % 3 == 0:
+					_grass_blades_light.push_back(base)
+					_grass_blades_light.push_back(tip)
+				else:
+					_grass_blades_mid.push_back(base)
+					_grass_blades_mid.push_back(tip)
 
 
 ## Isometric diamond-down conversion: cell → local 2D position (tile centre).
@@ -77,6 +120,14 @@ func _draw() -> void:
 				ctr + Vector2( -hw,    0.0),
 			])
 			draw_polygon(verts, ArtPalette.tile_gradient(base_col))
+
+	# Pass 1.4 — Grass blades (pre-computed, batched — 2 GPU calls total).
+	if not _grass_blades_light.is_empty():
+		draw_multiline(_grass_blades_light,
+			ArtPalette.TILE_GRASS.lightened(0.22), 1.0)
+	if not _grass_blades_mid.is_empty():
+		draw_multiline(_grass_blades_mid,
+			ArtPalette.TILE_GRASS.lightened(0.12), 1.0)
 
 	# Pass 1.5 — road centre-line dashes.
 	var stride  := MapGenerator.ZONE_STRIDE

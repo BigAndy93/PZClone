@@ -30,6 +30,7 @@ EventBus="*res://autoloads/EventBus.gd"
 DayNightCycle="*res://autoloads/DayNightCycle.gd"
 ArtPalette="*res://autoloads/ArtPalette.gd"
 FurnitureLibrary="*res://autoloads/FurnitureLibrary.gd"
+BuildingComponentBaker="*res://autoloads/BuildingComponentBaker.gd"
 FurnitureBaker="*res://autoloads/FurnitureBaker.gd"
 
 [debug]

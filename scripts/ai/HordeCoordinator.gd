@@ -19,23 +19,23 @@ extends Node
 
 
 # ── Debug ──────────────────────────────────────────────────────────────────────
-const DEBUG_NO_ZOMBIES := true   # set true to stop all zombie spawning
+const DEBUG_NO_ZOMBIES := false  # set true to stop all zombie spawning
 
 # ── Tuning ─────────────────────────────────────────────────────────────────────
 const PROPAGATION_RADIUS: float = 350.0   # alert chain radius (unchanged)
 
-# Population  (reduced for testing — restore when tuning horde balance)
-const MIN_ZOMBIES:       int   = 1       # target at session start
-const MAX_ZOMBIES:       int   = 4      # hard cap (server perf ceiling)
+# Population
+const MIN_ZOMBIES:       int   = 4       # target at session start
+const MAX_ZOMBIES:       int   = 20      # hard cap (server perf ceiling)
 const DIFFICULTY_RAMP_TIME: float = 360.0  # seconds to reach full difficulty
 const REPOP_INTERVAL:    float = 18.0    # seconds between population checks
 const MAX_SPAWN_PER_TICK: int  = 3       # zombies spawned per repop tick
 
 # Pack composition — chances at t=0 and t=1 (lerped by difficulty)
 const RUNNER_CHANCE_MIN: float = 0.08
-const RUNNER_CHANCE_MAX: float = 0.20
-const BRUTE_CHANCE_MIN:  float = 0.01
-const BRUTE_CHANCE_MAX:  float = 0.07
+const RUNNER_CHANCE_MAX: float = 0.30
+const BRUTE_CHANCE_MIN:  float = 0.02
+const BRUTE_CHANCE_MAX:  float = 0.20
 
 # Spawn positioning
 const SPAWN_DIST_MIN: float = 480.0
@@ -168,6 +168,7 @@ func register_alert(source_zombie: Node, alert_position: Vector2) -> void:
 			zombie.receive_horde_alert(alert_position)
 
 	EventBus.zombie_alerted.emit(source_zombie, alert_position)
+	EventBus.horde_alerted.emit()
 
 
 ## Alert all zombies within radius (e.g. from a loud noise burst).
