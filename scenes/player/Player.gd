@@ -159,6 +159,7 @@ var sync_health:     float   = 100.0
 var sync_is_downed:       bool    = false
 var sync_equipped_visual: int     = 0    # clothing tier (bits 0-2) + weapon flags (bits 3-4)
 var sync_sneak:           bool    = false
+var sync_current_floor:   int     = 0    # which storey the player is on (0 = ground)
 
 # ── Node refs ─────────────────────────────────────────────────────────────────
 @onready var sprite:           AnimatedSprite2D = $AnimatedSprite2D
@@ -350,6 +351,22 @@ func _handle_movement(delta: float) -> void:
 func _check_interact_input() -> void:
 	if not Input.is_action_just_pressed("interact"):
 		return
+
+	# Priority 0: stairwell — change floor.
+	var world_node := get_tree().get_first_node_in_group("world_node")
+	if world_node != null and world_node.get("_map_data") != null:
+		var map_data : MapData      = world_node._map_data
+		var tilemap  : WorldTileMap = world_node.get("tilemap") as WorldTileMap
+		if tilemap != null:
+			var tile_local : Vector2i = tilemap.local_to_map(global_position)
+			var tile_map   : Vector2i = tile_local - map_data.origin_offset
+			for bp: BuildingBlueprint in map_data.building_blueprints:
+				if tile_map in bp.stair_cells:
+					var max_floor := bp.floor_count - 1
+					var new_floor := sync_current_floor + 1 if sync_current_floor < max_floor \
+							else 0
+					rpc_request_change_floor.rpc_id(1, new_floor)
+					return
 
 	# Priority 1: revive a downed teammate.
 	for player_node in get_tree().get_nodes_in_group("players"):
@@ -621,6 +638,42 @@ func _build_npc_menu_obj(npc: Node) -> Dictionary:
 		"actions": [{"label": "Talk / Trade",
 					 "callable": func(): rpc_request_interact.rpc_id(1, npc.get_path())}],
 	}
+
+
+## Client → server: request a floor change via a stairwell.
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_request_change_floor(new_floor: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var peer_id := get_multiplayer_authority()
+	# Validate: player must actually be standing on a stair cell.
+	var world_node := get_tree().get_first_node_in_group("world_node")
+	if world_node == null:
+		return
+	var map_data : MapData      = world_node.get("_map_data") as MapData
+	var tilemap  : WorldTileMap = world_node.get("tilemap") as WorldTileMap
+	if map_data == null or tilemap == null:
+		return
+	var tile_local : Vector2i = tilemap.local_to_map(sync_position)
+	var tile_map   : Vector2i = tile_local - map_data.origin_offset
+	var valid := false
+	for bp: BuildingBlueprint in map_data.building_blueprints:
+		if tile_map in bp.stair_cells:
+			valid = true
+			break
+	if not valid:
+		return
+	# Clamp to valid range and push back to client.
+	var clamped := clampi(new_floor, 0, 9)
+	rpc_sync_floor.rpc_id(peer_id, clamped)
+
+
+## Server → owning client: confirmed floor change.
+@rpc("authority", "call_remote", "reliable")
+func rpc_sync_floor(floor: int) -> void:
+	sync_current_floor = floor
+	EventBus.item_used.emit(get_multiplayer_authority(),
+			"Floor %d" % (floor + 1))
 
 
 ## Client → server: request reviving a downed teammate.
@@ -1281,6 +1334,9 @@ func _setup_multiplayer_sync() -> void:
 			SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	config.add_property(NodePath(".:sync_sneak"))
 	config.property_set_replication_mode(NodePath(".:sync_sneak"),
+			SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
+	config.add_property(NodePath(".:sync_current_floor"))
+	config.property_set_replication_mode(NodePath(".:sync_current_floor"),
 			SceneReplicationConfig.REPLICATION_MODE_ON_CHANGE)
 	sync.replication_config = config
 

@@ -49,6 +49,7 @@ const FURN_FRIDGE     := 11
 const FURN_DRESSER    := 12
 const FURN_BATHTUB    := 13
 const FURN_COUCH      := 14   # sprite-sheet asset (assets/furniture/couch_sheet.png)
+const FURN_STAIRS     := 15   # stairwell leading to upper / lower floor
 
 # ── Map dimensions ────────────────────────────────────────────────────────────
 var seed_value:    int = 0

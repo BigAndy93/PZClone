@@ -88,6 +88,8 @@ static func get_box_specs() -> Array:
 		{"sn":0.44, "se":0.52, "h":18.0, "top_c":FAP,                  "side_c":FAP.darkened(0.15),   "type":"fridge",   "rots":[0,1] },  # fridge
 		{"sn":0.28, "se":0.60, "h":12.0, "top_c":FWS,                  "side_c":FWD,                  "type":"dresser",  "rots":[0,1] },  # dresser (new type)
 		{"sn":0.52, "se":1.04, "h": 6.0, "top_c":Color(0.72,0.74,0.76),"side_c":Color(0.58,0.60,0.62),"type":"bathtub",  "rots":[0,1] },  # bathtub
+		# ── stairs ────────────────────────────────────────────────────────────
+		{"sn":0.72, "se":0.72, "h":22.0, "top_c":Color(0.52,0.46,0.36),"side_c":Color(0.34,0.28,0.20),"type":"generic"               },  # stairwell
 	]
 
 
@@ -132,6 +134,8 @@ static func spec_for_furn(furn_type: int, rot: int = 0) -> Dictionary:
 			return {"sn":0.28, "se":0.60, "h":12.0, "top_c":FWS, "side_c":FWD, "type":"dresser", "rot":rot}
 		MapData.FURN_BATHTUB:
 			return {"sn":0.52, "se":1.04, "h": 6.0, "top_c":Color(0.72,0.74,0.76), "side_c":Color(0.58,0.60,0.62), "type":"bathtub", "rot":rot}
+		MapData.FURN_STAIRS:
+			return {"sn":0.72, "se":0.72, "h":22.0, "top_c":Color(0.52,0.46,0.36), "side_c":Color(0.34,0.28,0.20), "type":"generic", "rot":rot}
 	return {}
 
 

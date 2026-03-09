@@ -2,57 +2,68 @@
 
 `res://tools/AssetComposer.tscn` is an in-project editor utility for building map-generator-ready structure data from existing assets.
 
-## What it does
+## Implemented feature alignment (from design doc)
 
-- Scans `res://assets` recursively and loads sprite, scene, resource, audio, and JSON files into a searchable asset library.
-- Lets you organize placements into three structure groups:
-  - Building templates
-  - Scenes
-  - Map chunks
-- Lets you build placements by assigning:
-  - Asset path
-  - Tile coordinates (`x`, `y`, `z`)
-  - Rotation in degrees
-  - Scale
-  - Layer tag
-  - Unique flag
-- Supports placement duplication for quickly creating one-off variants.
-- Saves and loads a working file from `user://asset_composer_structures.json`.
-- Exports map-generator input JSON to `res://resources/map_templates/asset_composer_export.json`.
+Implemented now:
 
-## Running it
+- Asset browser with search + category filters + favorites + tagging
+- Visual isometric placement viewport in two workspaces:
+  - Composer tab for detailed editing
+  - Viewport tab for clean empty-grid template blockout
+- Spritesheet metadata editor + visual frame-grid viewer
+- Structure composition with floors/walls/doors/props via layers
+- Room designation with metadata fields:
+  - Room type
+  - Lighting type
+  - Spawn points
+  - Loot table
+- Template metadata fields:
+  - Category
+  - Spawn weight
+  - Tags
+  - Derived size and room count
+- Validation pass button before save/export
+- Save/load/export JSON pipeline for procedural generation
 
-1. Open Godot.
-2. Open and run `tools/AssetComposer.tscn`.
-3. Use the left panel to choose assets.
-4. Use the right panel to create/edit structures and placements.
-5. Click **Export For Map Generator** when ready.
+Partially implemented / future work:
 
-## Export format
+- Paint tool suite (rectangle/line/fill/eraser/eyedropper)
+- Wall-edge segment system with auto corners
+- Full preview mode simulation
+- Advanced path/accessibility validation
 
-The export JSON contains:
+## Data output
+
+Export includes:
 
 - `version`
 - `exported_at_unix`
+- `sprite_metadata`
+- `asset_browser`
+  - `favorites`
+  - `tags`
 - `types`
-  - `building_templates`: array of structure objects
-  - `scenes`: array of structure objects
-  - `map_chunks`: array of structure objects
+  - `building_templates`
+  - `scenes`
+  - `map_chunks`
 
-Each structure object includes:
+Each structure includes:
 
-- `id`
-- `name`
-- `notes`
-- `placements`: array of placement objects
+- core fields (`id`, `name`, `notes`, `width`, `depth`, `floors`)
+- `template_metadata` (`category`, `spawn_weight`, `tags`, derived size/room_count)
+- `generation`
+- `rooms`
+- `furniture`
+- `placements`
 
-Each placement object includes:
+## Main workflow
 
-- `asset`
-- `x`, `y`, `z`
-- `rotation_deg`
-- `scale`
-- `layer`
-- `unique`
+1. Select asset category/filter/tag in left panel.
+2. Place on visual isometric grid (click to place, drag to move).
+3. Define structure metadata and generation rules.
+4. Define rooms and room metadata.
+5. Populate furniture/props.
+6. Run **Validate Template**.
+7. Save local and export for generator.
 
-This format is intentionally data-driven so map generation systems can consume it directly or via a converter pass.
+

@@ -1,0 +1,27 @@
+{
+	"version": 1,
+	"exported_at_unix": 1772995052.963,
+	"types": {
+		"building_templates": [
+			{
+				"id": "building_templates_001",
+				"name": "Building Templates 1",
+				"notes": "",
+				"placements": [
+					{
+						"asset": "res://assets/furniture/bookshelf_sheet.png",
+						"x": 0.0,
+						"y": 0.0,
+						"z": 0.0,
+						"rotation_deg": 0.0,
+						"scale": 1.0,
+						"layer": "default",
+						"unique": false
+					}
+				]
+			}
+		],
+		"scenes": [],
+		"map_chunks": []
+	}
+}

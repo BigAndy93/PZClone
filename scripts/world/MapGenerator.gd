@@ -312,6 +312,8 @@ static func _try_place_building(data: MapData, zone_rect: Rect2i, zone_type: int
 	bp.zone_type      = zone_type
 	bp.archetype      = arch
 	bp.height_tiles   = 4 if (bw >= 8 or bh >= 7) else 3
+	bp.floor_count    = _pick_floor_count(arch, bw, bh)
+	bp.story_h_tiles  = maxi(1, bp.height_tiles / bp.floor_count)
 
 	for dy in bh:
 		for dx in bw:
@@ -357,6 +359,10 @@ static func _try_place_building(data: MapData, zone_rect: Rect2i, zone_type: int
 		_:
 			loot_count = _rng.randi_range(2, 4)
 	_place_container_loot(data, bp, zone_type, loot_count)
+
+	# ── Upper floors ─────────────────────────────────────────────────────────
+	if bp.floor_count >= 2:
+		_generate_upper_floor(data, bp, bx, by, bw, bh, arch)
 
 	data.building_blueprints.append(bp)
 
@@ -942,3 +948,466 @@ static func _zombie_density_for_zone(zone: int) -> float:
 		ZoneType.RURAL:       return 0.06
 		ZoneType.FOREST:      return 0.05
 		_:                    return 0.0
+
+
+# ===========================================================================
+# Multi-story — upper floor generation
+# ===========================================================================
+
+## Returns 1 or 2 depending on archetype and building size.
+static func _pick_floor_count(arch: int, bw: int, bh: int) -> int:
+	match arch:
+		BuildingBlueprint.Archetype.OFFICE:
+			# Offices are always 2-storey when large enough.
+			return 2 if (bw >= 6 and bh >= 5) else 1
+		BuildingBlueprint.Archetype.WAREHOUSE:
+			# Large warehouses get a mezzanine / upper office level ~60% of the time.
+			return 2 if (bw >= 9 and bh >= 7 and _rng.randf() < 0.60) else 1
+		BuildingBlueprint.Archetype.MEDIUM_HOUSE:
+			# Medium houses are 2-storey ~40% of the time when big enough.
+			return 2 if (bw >= 6 and bh >= 5 and _rng.randf() < 0.40) else 1
+		_:
+			return 1
+
+
+## Generates the upper floor for a multi-storey building:
+##   • Creates a FloorData with rooms, walls, doors, windows, and furniture.
+##   • Places FURN_STAIRS on the ground floor (MapData) and upper floor (FloorData).
+##   • Appends the FloorData to bp.upper_floors.
+## Currently only floor index 1 (2nd floor) is supported.
+static func _generate_upper_floor(data: MapData, bp: BuildingBlueprint,
+		bx: int, by: int, bw: int, bh: int, arch: int) -> void:
+	var fd := BuildingBlueprint.FloorData.new()
+
+	# Rooms on this floor receive IDs that continue from ground floor so they
+	# are globally unique within the building.
+	var room_id_start := bp.rooms.size()
+
+	# ── Exterior perimeter walls (same footprint as ground floor) ────────────
+	for tx in range(bx, bx + bw):
+		fd.add_wall_edge(tx, by,       MapData.DIR_N)
+		fd.add_wall_edge(tx, by + bh,  MapData.DIR_N)
+	for ty in range(by, by + bh):
+		fd.add_wall_edge(bx,       ty, MapData.DIR_W)
+		fd.add_wall_edge(bx + bw,  ty, MapData.DIR_W)
+
+	# ── Windows on upper floor (same face rules as ground floor) ─────────────
+	_ufloor_place_windows(fd, bx, by, bw, bh, arch)
+
+	# ── Room subdivision ─────────────────────────────────────────────────────
+	if arch in BuildingBlueprint.RESIDENTIAL_ARCHETYPES:
+		_ufloor_bsp_split(fd, bp, Rect2i(bx, by, bw, bh), 0, room_id_start)
+	else:
+		_ufloor_commercial_rooms(fd, bp, bx, by, bw, bh, arch, room_id_start)
+
+	# ── Furniture ────────────────────────────────────────────────────────────
+	_ufloor_place_furniture(fd, bp)
+
+	# ── Stairs — pick a location and mark it on both floors ──────────────────
+	_place_stairs(data, bp, fd)
+
+	bp.upper_floors.append(fd)
+
+
+# ---------------------------------------------------------------------------
+# Upper-floor room subdivision helpers
+# ---------------------------------------------------------------------------
+
+static func _ufloor_commercial_rooms(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, bx: int, by: int, bw: int, bh: int,
+		arch: int, id_start: int) -> void:
+	match arch:
+		BuildingBlueprint.Archetype.OFFICE:
+			# Upper floor: open plan + small meeting room at north end.
+			if bw >= 6:
+				var split_h := maxi(2, int(float(bh) * 0.40))
+				_ufloor_add_horizontal_wall(fd, bp, bx, bw, by + split_h)
+				_ufloor_add_room(fd, bp, BuildingBlueprint.RoomDef.Purpose.STORAGE,
+						Rect2i(bx, by, bw, split_h), id_start)
+				_ufloor_add_room(fd, bp, BuildingBlueprint.RoomDef.Purpose.OFFICE_FLOOR,
+						Rect2i(bx, by + split_h, bw, bh - split_h), id_start + 1)
+			else:
+				_ufloor_add_single_room(fd, bp,
+						BuildingBlueprint.RoomDef.Purpose.OFFICE_FLOOR,
+						bx, by, bw, bh, id_start)
+
+		BuildingBlueprint.Archetype.WAREHOUSE:
+			# Upper mezzanine: storage room across north half.
+			if bw >= 7:
+				var split_h := maxi(2, int(float(bh) * 0.45))
+				_ufloor_add_horizontal_wall(fd, bp, bx, bw, by + split_h)
+				_ufloor_add_room(fd, bp, BuildingBlueprint.RoomDef.Purpose.STORAGE,
+						Rect2i(bx, by, bw, split_h), id_start)
+				_ufloor_add_room(fd, bp, BuildingBlueprint.RoomDef.Purpose.OFFICE_FLOOR,
+						Rect2i(bx, by + split_h, bw, bh - split_h), id_start + 1)
+			else:
+				_ufloor_add_single_room(fd, bp,
+						BuildingBlueprint.RoomDef.Purpose.STORAGE,
+						bx, by, bw, bh, id_start)
+
+		_:
+			# Generic upper floor: single open room.
+			_ufloor_add_single_room(fd, bp,
+					BuildingBlueprint.RoomDef.Purpose.COMMERCIAL,
+					bx, by, bw, bh, id_start)
+
+
+static func _ufloor_bsp_split(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, rect: Rect2i, depth: int, id_start: int) -> void:
+	var can_vsplit := rect.size.x >= 6
+	var can_hsplit := rect.size.y >= 6
+
+	if depth >= 2 or (not can_vsplit and not can_hsplit):
+		var purpose := _bsp_purpose(bp.archetype, rect, bp.bounds)
+		_ufloor_add_room(fd, bp, purpose, rect, id_start + fd.rooms.size())
+		return
+
+	if can_vsplit and (not can_hsplit or rect.size.x >= rect.size.y):
+		var col := rect.position.x + _rng.randi_range(3, rect.size.x - 3)
+		for ty in range(rect.position.y, rect.end.y):
+			fd.add_wall_edge(col, ty, MapData.DIR_W)
+		var door_ty := rect.position.y + _rng.randi_range(1, rect.size.y - 2)
+		fd.remove_wall_edge(col, door_ty, MapData.DIR_W)
+		fd.door_edges[MapData.edge_key(col, door_ty, MapData.DIR_W)] = bp.story_h_tiles
+		_ufloor_bsp_split(fd, bp,
+				Rect2i(rect.position, Vector2i(col - rect.position.x, rect.size.y)),
+				depth + 1, id_start)
+		_ufloor_bsp_split(fd, bp,
+				Rect2i(Vector2i(col, rect.position.y), Vector2i(rect.end.x - col, rect.size.y)),
+				depth + 1, id_start)
+	else:
+		var row := rect.position.y + _rng.randi_range(3, rect.size.y - 3)
+		for tx in range(rect.position.x, rect.end.x):
+			fd.add_wall_edge(tx, row, MapData.DIR_N)
+		var door_tx := rect.position.x + _rng.randi_range(1, rect.size.x - 2)
+		fd.remove_wall_edge(door_tx, row, MapData.DIR_N)
+		fd.door_edges[MapData.edge_key(door_tx, row, MapData.DIR_N)] = bp.story_h_tiles
+		_ufloor_bsp_split(fd, bp,
+				Rect2i(rect.position, Vector2i(rect.size.x, row - rect.position.y)),
+				depth + 1, id_start)
+		_ufloor_bsp_split(fd, bp,
+				Rect2i(Vector2i(rect.position.x, row), Vector2i(rect.size.x, rect.end.y - row)),
+				depth + 1, id_start)
+
+
+static func _ufloor_add_horizontal_wall(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, bx: int, bw: int, split_row: int) -> void:
+	for tx in range(bx, bx + bw):
+		fd.add_wall_edge(tx, split_row, MapData.DIR_N)
+	var door_tx := bx + _rng.randi_range(1, bw - 2)
+	fd.remove_wall_edge(door_tx, split_row, MapData.DIR_N)
+	fd.door_edges[MapData.edge_key(door_tx, split_row, MapData.DIR_N)] = bp.story_h_tiles
+
+
+static func _ufloor_add_vertical_wall(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, by: int, bh: int, split_col: int) -> void:
+	for ty in range(by, by + bh):
+		fd.add_wall_edge(split_col, ty, MapData.DIR_W)
+	var door_ty := by + _rng.randi_range(1, bh - 2)
+	fd.remove_wall_edge(split_col, door_ty, MapData.DIR_W)
+	fd.door_edges[MapData.edge_key(split_col, door_ty, MapData.DIR_W)] = bp.story_h_tiles
+
+
+static func _ufloor_add_room(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, purpose: int,
+		room_rect: Rect2i, room_id: int) -> void:
+	var room := BuildingBlueprint.RoomDef.make(room_id, purpose, room_rect, 1)
+	for dy in room_rect.size.y:
+		for dx in room_rect.size.x:
+			room.floor_cells.append(Vector2i(
+					room_rect.position.x + dx, room_rect.position.y + dy))
+	fd.rooms.append(room)
+
+
+static func _ufloor_add_single_room(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint, purpose: int,
+		bx: int, by: int, bw: int, bh: int, room_id: int) -> void:
+	_ufloor_add_room(fd, bp, purpose, Rect2i(bx, by, bw, bh), room_id)
+
+
+# ---------------------------------------------------------------------------
+# Upper-floor windows
+# ---------------------------------------------------------------------------
+
+static func _ufloor_place_windows(fd: BuildingBlueprint.FloorData,
+		bx: int, by: int, bw: int, bh: int, arch: int) -> void:
+	# NE face (N edge)
+	var n_count := 1 if arch in [
+			BuildingBlueprint.Archetype.SMALL_HOUSE,
+			BuildingBlueprint.Archetype.FARMHOUSE,
+			BuildingBlueprint.Archetype.GARAGE] else 2
+	for i in n_count:
+		var tx := bx + bw / 2 if n_count == 1 \
+				else bx + 1 + int(float(i) / float(n_count) * (bw - 2))
+		if tx <= bx or tx >= bx + bw - 1:
+			continue
+		var ek := MapData.edge_key(tx, by, MapData.DIR_N)
+		if fd.wall_edges.has(ek) and not fd.door_edges.has(ek):
+			fd.window_edges[ek] = MapData.WIN_INTACT
+
+	# NW face (W edge)
+	var w_count := 1 if bh <= 5 else 2
+	for i in w_count:
+		var ty := by + bh / 2 if w_count == 1 \
+				else by + 1 + int(float(i) / float(w_count) * (bh - 2))
+		if ty <= by or ty >= by + bh - 1:
+			continue
+		var ek := MapData.edge_key(bx, ty, MapData.DIR_W)
+		if fd.wall_edges.has(ek) and not fd.door_edges.has(ek):
+			fd.window_edges[ek] = MapData.WIN_INTACT
+
+	# SE face (N edge of south row) — camera-visible
+	var se_archs := [
+		BuildingBlueprint.Archetype.MEDIUM_HOUSE, BuildingBlueprint.Archetype.DUPLEX,
+		BuildingBlueprint.Archetype.OFFICE,       BuildingBlueprint.Archetype.RESTAURANT,
+		BuildingBlueprint.Archetype.FARMHOUSE,
+	]
+	if arch in se_archs:
+		var se_count := 1 if bw <= 6 else 2
+		for i in se_count:
+			var tx := bx + bw / 2 if se_count == 1 \
+					else bx + 1 + int(float(i) / float(se_count) * (bw - 2))
+			if tx <= bx or tx >= bx + bw - 1:
+				continue
+			var ek := MapData.edge_key(tx, by + bh, MapData.DIR_N)
+			if fd.wall_edges.has(ek) and not fd.door_edges.has(ek):
+				fd.window_edges[ek] = MapData.WIN_INTACT
+
+	# SW face (W edge of east column)
+	var sw_archs := [
+		BuildingBlueprint.Archetype.MEDIUM_HOUSE, BuildingBlueprint.Archetype.DUPLEX,
+		BuildingBlueprint.Archetype.OFFICE,
+	]
+	if arch in sw_archs:
+		var sw_count := 1 if bh <= 5 else 2
+		for i in sw_count:
+			var ty := by + bh / 2 if sw_count == 1 \
+					else by + 1 + int(float(i) / float(sw_count) * (bh - 2))
+			if ty <= by or ty >= by + bh - 1:
+				continue
+			var ek := MapData.edge_key(bx + bw, ty, MapData.DIR_W)
+			if fd.wall_edges.has(ek) and not fd.door_edges.has(ek):
+				fd.window_edges[ek] = MapData.WIN_INTACT
+
+
+# ---------------------------------------------------------------------------
+# Stair placement
+# ---------------------------------------------------------------------------
+
+## Picks a free interior tile, places FURN_STAIRS on ground floor (MapData) and
+## upper floor (FloorData), and records the location in bp.stair_cells.
+static func _place_stairs(data: MapData, bp: BuildingBlueprint,
+		fd: BuildingBlueprint.FloorData) -> void:
+	var b := bp.bounds
+	# Prefer a tile near the centre of the building that is free on BOTH floors.
+	var cx := b.position.x + b.size.x / 2
+	var cy := b.position.y + b.size.y / 2
+
+	var candidate := Vector2i(-1, -1)
+
+	# Spiral out from centre looking for a tile that is unoccupied on both floors
+	# and not in a door zone.
+	var dz := _build_door_zone(data, bp)
+	for radius in range(0, maxi(b.size.x, b.size.y)):
+		for dy in range(-radius, radius + 1):
+			for dx in range(-radius, radius + 1):
+				if absi(dx) != radius and absi(dy) != radius:
+					continue  # only check the ring at this radius
+				var tx := cx + dx
+				var ty := cy + dy
+				if tx <= b.position.x or ty <= b.position.y \
+						or tx >= b.end.x - 1 or ty >= b.end.y - 1:
+					continue
+				if dz.has(Vector2i(tx, ty)):
+					continue
+				if data.is_occupied(tx, ty):
+					continue
+				if fd.is_occupied(tx, ty):
+					continue
+				candidate = Vector2i(tx, ty)
+				break
+			if candidate.x >= 0:
+				break
+		if candidate.x >= 0:
+			break
+
+	if candidate.x < 0:
+		# Fallback: just use building centre (may overlap furniture)
+		candidate = Vector2i(cx, cy)
+
+	# Place on ground floor in MapData
+	data.set_furniture(candidate.x, candidate.y, MapData.FURN_STAIRS)
+	data.set_furn_rot(candidate.x, candidate.y, 0)
+	data.set_occupied(candidate.x, candidate.y, true)
+
+	# Place on upper floor in FloorData
+	fd.set_furniture_at(candidate.x, candidate.y, MapData.FURN_STAIRS)
+	fd.set_furn_rot_at(candidate.x, candidate.y, 0)
+	fd.set_occupied_at(candidate.x, candidate.y)
+	fd.stair_cells.append(candidate)
+
+	# Record in blueprint so Player can detect it
+	bp.stair_cells.append(candidate)
+
+
+# ---------------------------------------------------------------------------
+# Upper-floor furniture placement
+# ---------------------------------------------------------------------------
+
+static func _ufloor_place_furniture(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint) -> void:
+	var dz := _ufloor_build_door_zone(fd, bp)
+	for room: BuildingBlueprint.RoomDef in fd.rooms:
+		match room.purpose:
+			BuildingBlueprint.RoomDef.Purpose.BEDROOM:
+				_ufloor_wall(fd, room, MapData.FURN_BED,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+				_ufloor_wall(fd, room, MapData.FURN_NIGHTSTAND,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+				_ufloor_wall(fd, room, MapData.FURN_LOCKER,
+						dz, [MapData.DIR_E, MapData.DIR_S, MapData.DIR_W, MapData.DIR_N])
+
+			BuildingBlueprint.RoomDef.Purpose.LIVING:
+				_ufloor_wall(fd, room, MapData.FURN_SOFA,
+						dz, [MapData.DIR_S, MapData.DIR_E, MapData.DIR_W, MapData.DIR_N])
+				_ufloor_free(fd, room, MapData.FURN_TABLE, dz)
+				_ufloor_free(fd, room, MapData.FURN_CHAIR, dz)
+
+			BuildingBlueprint.RoomDef.Purpose.KITCHEN:
+				_ufloor_wall(fd, room, MapData.FURN_STOVE,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+				_ufloor_wall(fd, room, MapData.FURN_COUNTER,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+
+			BuildingBlueprint.RoomDef.Purpose.STORAGE:
+				_ufloor_wall(fd, room, MapData.FURN_SHELF,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+				_ufloor_wall(fd, room, MapData.FURN_SHELF,
+						dz, [MapData.DIR_W, MapData.DIR_E, MapData.DIR_S, MapData.DIR_N])
+				_ufloor_wall(fd, room, MapData.FURN_LOCKER,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+
+			BuildingBlueprint.RoomDef.Purpose.COMMERCIAL, \
+			BuildingBlueprint.RoomDef.Purpose.OFFICE_FLOOR:
+				_ufloor_wall(fd, room, MapData.FURN_SHELF,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+				_ufloor_free(fd, room, MapData.FURN_DESK, dz)
+				_ufloor_wall(fd, room, MapData.FURN_LOCKER,
+						dz, [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S])
+
+
+static func _ufloor_build_door_zone(fd: BuildingBlueprint.FloorData,
+		bp: BuildingBlueprint) -> Dictionary:
+	var blocked: Dictionary = {}
+	var b := bp.bounds
+	for ek: Vector3i in fd.door_edges:
+		var tx := ek.x;  var ty := ek.y;  var dir := ek.z
+		if tx < b.position.x or tx > b.end.x or ty < b.position.y or ty > b.end.y:
+			continue
+		blocked[Vector2i(tx, ty)] = true
+		if dir == MapData.DIR_N:
+			blocked[Vector2i(tx, ty - 1)] = true
+		else:
+			blocked[Vector2i(tx - 1, ty)] = true
+	return blocked
+
+
+## FloorData-aware variant of _wall().
+static func _ufloor_wall(fd: BuildingBlueprint.FloorData,
+		room: BuildingBlueprint.RoomDef,
+		furn_type: int, dz: Dictionary, preferred_dirs: Array) -> bool:
+	var candidates: Array = []
+	for cell_v in room.floor_cells:
+		var cell := cell_v as Vector2i
+		if fd.is_occupied(cell.x, cell.y) or dz.has(cell):
+			continue
+		for dir in preferred_dirs:
+			if fd.has_wall_edge(cell.x, cell.y, dir):
+				var ek := MapData.edge_key(cell.x, cell.y, dir)
+				if not fd.door_edges.has(ek):
+					candidates.append([cell, dir])
+					break
+	if candidates.is_empty():
+		return false
+	var fp      := _furn_fp(furn_type)
+	var valid: Array = []
+	for cand: Array in candidates:
+		var cell: Vector2i = cand[0]
+		var dir: int       = cand[1]
+		var rot: int       = _wall_rot(dir, furn_type)
+		var cells: Array   = _fp_cells(cell, rot, fp)
+		if _ufloor_fp_valid(fd, room, cells, dz):
+			valid.append([cell, rot, cells])
+	if valid.is_empty():
+		return false
+	var pick: Array      = valid[_rng.randi() % valid.size()]
+	var anchor: Vector2i = pick[0]
+	var rot: int         = pick[1]
+	var fp_cells: Array  = pick[2]
+	fd.set_furniture_at(anchor.x, anchor.y, furn_type)
+	fd.set_furn_rot_at(anchor.x, anchor.y, rot)
+	fd.set_occupied_at(anchor.x, anchor.y)
+	for cell: Vector2i in fp_cells:
+		if cell != anchor:
+			fd.set_occupied_at(cell.x, cell.y)
+	return true
+
+
+## FloorData-aware variant of _free().
+static func _ufloor_free(fd: BuildingBlueprint.FloorData,
+		room: BuildingBlueprint.RoomDef,
+		furn_type: int, dz: Dictionary) -> bool:
+	var rots: Array
+	if _supports_all_rots(furn_type):
+		rots = [0, 1, 2, 3]
+	elif _supports_rot1(furn_type):
+		rots = [0, 1]
+	else:
+		rots = [0]
+	var fp         := _furn_fp(furn_type)
+	var inner: Array   = []
+	var any_open: Array = []
+	for cell_v in room.floor_cells:
+		var cell := cell_v as Vector2i
+		if fd.is_occupied(cell.x, cell.y) or dz.has(cell):
+			continue
+		var has_wall := false
+		for dir in [MapData.DIR_N, MapData.DIR_W, MapData.DIR_E, MapData.DIR_S]:
+			if fd.has_wall_edge(cell.x, cell.y, dir):
+				has_wall = true
+				break
+		for rot: int in rots:
+			var cells := _fp_cells(cell, rot, fp)
+			if _ufloor_fp_valid(fd, room, cells, dz):
+				var entry := [cell, rot, cells]
+				if not has_wall:
+					inner.append(entry)
+				any_open.append(entry)
+				break
+	var pool := inner if not inner.is_empty() else any_open
+	if pool.is_empty():
+		return false
+	var pick: Array      = pool[_rng.randi() % pool.size()]
+	var anchor: Vector2i = pick[0]
+	var rot: int         = pick[1]
+	var fp_cells: Array  = pick[2]
+	fd.set_furniture_at(anchor.x, anchor.y, furn_type)
+	fd.set_furn_rot_at(anchor.x, anchor.y, rot)
+	fd.set_occupied_at(anchor.x, anchor.y)
+	for cell: Vector2i in fp_cells:
+		if cell != anchor:
+			fd.set_occupied_at(cell.x, cell.y)
+	return true
+
+
+static func _ufloor_fp_valid(fd: BuildingBlueprint.FloorData,
+		room: BuildingBlueprint.RoomDef,
+		cells: Array, dz: Dictionary) -> bool:
+	for cell: Vector2i in cells:
+		if cell not in room.floor_cells:
+			return false
+		if fd.is_occupied(cell.x, cell.y):
+			return false
+		if dz.has(cell):
+			return false
+	return true

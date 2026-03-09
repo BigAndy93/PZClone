@@ -16,6 +16,8 @@ extends Node2D
 
 const WALL_H_PER_TILE  : float = 32.0
 const UNEXPLORED_ALPHA : float = 0.0   # target alpha for rooms not yet entered
+## z-index offset added to upper-floor sprites so they sort above ground-floor sprites.
+const FLOOR_Z_STRIDE   : int   = 600
 
 # Baseboard strip drawn at the base of every wall face.
 # Stays partially visible when the wall above is cut away (occlusion hint).
@@ -38,9 +40,13 @@ var _origin:      Vector2i
 var _pos_outside: Vector2   # SW corner — correct y-sort when player is outside
 var _pos_inside:  Vector2   # NW corner — correct y-sort when player is inside
 
+## Which floor the local player is currently on (0 = ground, 1 = 2nd floor, …).
+var current_floor: int = 0
+
 
 # ── Multi-layer visibility state ─────────────────────────────────────────────────
-var tile_to_room:          Dictionary = {}   # Vector2i → int room_id
+## Key: Vector3i(tx, ty, floor_idx) → room_id.  Covers all floors.
+var tile_to_room:          Dictionary = {}   # Vector3i(tx,ty,floor) → int room_id
 var _target_room_alphas:   Dictionary = {}   # room_id → float
 var _current_room_alphas:  Dictionary = {}   # room_id → float
 var _target_front_alpha:   float = 1.0
@@ -86,6 +92,14 @@ func setup(bp: BuildingBlueprint, data: MapData,
 	_spawn_wall_sprites()
 	_spawn_floor_sprites()
 	_spawn_furn_sprites()
+	_spawn_upper_floor_sprites()
+
+
+## Switch which storey is displayed.  Hides all sprites for other floors and
+## shows sprites for the new floor.  Call before set_visibility_data().
+func set_current_floor(floor: int) -> void:
+	current_floor = floor
+	_apply_sprite_alphas()
 
 
 ## Backwards-compatible shim — kept for any legacy call sites.
@@ -136,6 +150,34 @@ func set_visibility_data(player_room_id: int, adjacent_ids: Array, inside: bool,
 		entry["sprite"].visible = inside
 
 	set_process(true)
+
+
+## Rebuild all wall, door, window, and baseboard sprites from current MapData.
+## Call after any debug edit that adds, removes, or changes wall/door/window edges.
+func refresh_walls() -> void:
+	for entry in _wall_sprites:
+		if entry.has("sprite") and is_instance_valid(entry["sprite"]):
+			entry["sprite"].queue_free()
+	for entry in _baseboard_sprites:
+		if entry.has("poly") and is_instance_valid(entry["poly"]):
+			entry["poly"].queue_free()
+	_wall_sprites.clear()
+	_baseboard_sprites.clear()
+	_build_room_lookup()   # door/window edges affect room connectivity
+	_spawn_wall_sprites()
+	_apply_sprite_alphas()
+
+
+## Rebuild all furniture sprites from current MapData.
+## Call after any debug edit that places, removes, or changes furniture.
+func refresh_furniture() -> void:
+	for entry in _furn_sprites:
+		if entry.has("sprite") and is_instance_valid(entry["sprite"]):
+			entry["sprite"].queue_free()
+	_furn_sprites.clear()
+	_spawn_furn_sprites()
+	_spawn_upper_furn_sprites()
+	_apply_sprite_alphas()
 
 
 ## Call when a window state changes (broken/open) to swap in the correct baked texture.
@@ -201,32 +243,41 @@ func _process(_delta: float) -> void:
 func _apply_sprite_alphas() -> void:
 	var b := _bp.bounds
 
-	# Wall sprites
+	# Wall sprites — hide entirely when on a different floor.
 	for entry in _wall_sprites:
-		var alpha: float = _wall_alpha_from_entry(entry, b)
-		entry["sprite"].modulate.a = alpha
+		var spr: Sprite2D = entry["sprite"]
+		if entry.get("floor_idx", 0) != current_floor:
+			spr.modulate.a = 0.0
+			continue
+		spr.modulate.a = _wall_alpha_from_entry(entry, b)
 
-	# Baseboard strips — follow wall alpha but stay visible at BASEBOARD_MIN_ALPHA
+	# Baseboard strips — same floor gating as walls.
 	for entry in _baseboard_sprites:
+		if entry.get("floor_idx", 0) != current_floor:
+			entry["poly"].modulate.a = 0.0
+			continue
 		entry["poly"].modulate.a = _baseboard_alpha_from_entry(entry, b)
 
-	# Floor sprites — alpha driven by room exploration state.
+	# Floor sprites — only show current floor.
 	for entry in _floor_sprites:
 		var spr: Sprite2D = entry["sprite"]
 		if not spr.visible:
+			continue
+		if entry.get("floor_idx", 0) != current_floor:
+			spr.modulate.a = 0.0
 			continue
 		var rid: int  = entry["rid"]
 		var ra: float = _current_room_alphas.get(rid, 1.0) if rid >= 0 else 1.0
 		spr.modulate.a = ra
 
-	# Furniture sprites (only when visible)
-	# Only fade furniture that is at or in front of the player in isometric depth
-	# (tile.x + tile.y >= player.x + player.y). Furniture behind the player stays
-	# fully opaque — it doesn't occlude the player character.
+	# Furniture sprites — only show current floor; depth-fade logic unchanged.
 	var p_depth: int = _player_tile.x + _player_tile.y
 	for entry in _furn_sprites:
 		var spr: Sprite2D = entry["sprite"]
 		if not spr.visible:
+			continue
+		if entry.get("floor_idx", 0) != current_floor:
+			spr.modulate.a = 0.0
 			continue
 		var tile: Vector2i = entry["tile"]
 		if _player_tile.x >= 0 and (tile.x + tile.y) < p_depth:
@@ -291,11 +342,20 @@ func _build_room_lookup() -> void:
 	_explored_rooms.clear()
 	if _bp == null:
 		return
+	# Ground floor (floor index 0)
 	for room: BuildingBlueprint.RoomDef in _bp.rooms:
 		_target_room_alphas[room.id]  = 1.0
 		_current_room_alphas[room.id] = 1.0
 		for cell: Vector2i in room.floor_cells:
-			tile_to_room[cell] = room.id
+			tile_to_room[Vector3i(cell.x, cell.y, 0)] = room.id
+	# Upper floors — start unexplored so sprites stay hidden until explored.
+	for fi in _bp.upper_floors.size():
+		var fd: BuildingBlueprint.FloorData = _bp.upper_floors[fi]
+		for room: BuildingBlueprint.RoomDef in fd.rooms:
+			_target_room_alphas[room.id]  = UNEXPLORED_ALPHA
+			_current_room_alphas[room.id] = UNEXPLORED_ALPHA
+			for cell: Vector2i in room.floor_cells:
+				tile_to_room[Vector3i(cell.x, cell.y, fi + 1)] = room.id
 
 
 ## Returns true if the given room has been entered by the local player this session.
@@ -368,36 +428,36 @@ func _spawn_wall_sprites() -> void:
 
 func _add_wall_sprite(key: String, local_c: Vector2, flip_h: bool,
 		tx: int, ty: int, dir: int, b: Rect2i,
-		ek: Vector3i, is_win: bool, nw_face: bool, _h_str: String) -> void:
+		ek: Vector3i, is_win: bool, nw_face: bool, _h_str: String,
+		floor_idx: int = 0) -> void:
 	if not BuildingComponentBaker.has_component(key):
 		return
 	var spr := BuildingComponentBaker.get_sprite(key, local_c, flip_h)
-	# Depth-sort: walls sit half-step in front of the tile to their north/west
-	# and half-step behind the tile they belong to.  (tx+ty)*2-1 places them
-	# between the two flanking tile layers.
-	spr.z_index = (tx + ty) * 2 - 1
+	var z_base: int = (tx + ty) * 2 - 1 + floor_idx * FLOOR_Z_STRIDE
+	spr.z_index = z_base
 	add_child(spr)
 
-	# Room IDs on each side of this wall edge
+	# Room IDs on each side of this wall edge (keyed by floor)
 	var ta := Vector2i(tx, ty - 1) if dir == MapData.DIR_N else Vector2i(tx - 1, ty)
 	var tb := Vector2i(tx, ty)
-	var rid_a: int = tile_to_room.get(ta, -1)
-	var rid_b: int = tile_to_room.get(tb, -1)
+	var rid_a: int = tile_to_room.get(Vector3i(ta.x, ta.y, floor_idx), -1)
+	var rid_b: int = tile_to_room.get(Vector3i(tb.x, tb.y, floor_idx), -1)
 
 	# Camera-facing exterior walls (south and east building boundary)
 	var is_front := (dir == MapData.DIR_N and ty == b.end.y) \
 				 or (dir == MapData.DIR_W and tx == b.end.x)
 
 	_wall_sprites.append({
-		"sprite":   spr,
-		"rid_a":    rid_a,
-		"rid_b":    rid_b,
-		"is_front": is_front,
-		"edge_key": ek,
+		"sprite":    spr,
+		"rid_a":     rid_a,
+		"rid_b":     rid_b,
+		"is_front":  is_front,
+		"edge_key":  ek,
 		"is_window": is_win,
-		"nw_face":  nw_face,
-		"tile_x":   tx,
-		"tile_y":   ty,
+		"nw_face":   nw_face,
+		"tile_x":    tx,
+		"tile_y":    ty,
+		"floor_idx": floor_idx,
 	})
 
 	# Baseboard strip — thin isometric parallelogram at the floor edge of this wall face.
@@ -415,16 +475,17 @@ func _add_wall_sprite(key: String, local_c: Vector2, flip_h: bool,
 	])
 	board.color           = board_col
 	board.position        = local_c
-	board.z_index         = (tx + ty) * 2 - 1
+	board.z_index         = (tx + ty) * 2 - 1 + floor_idx * FLOOR_Z_STRIDE
 	add_child(board)
 	_baseboard_sprites.append({
-		"poly":     board,
-		"rid_a":    rid_a,
-		"rid_b":    rid_b,
-		"is_front": is_front,
-		"nw_face":  nw_face,
-		"tile_x":   tx,
-		"tile_y":   ty,
+		"poly":      board,
+		"rid_a":     rid_a,
+		"rid_b":     rid_b,
+		"is_front":  is_front,
+		"nw_face":   nw_face,
+		"tile_x":    tx,
+		"tile_y":    ty,
+		"floor_idx": floor_idx,
 	})
 
 
@@ -437,8 +498,8 @@ func _spawn_floor_sprites() -> void:
 		var spr     := BuildingComponentBaker.get_sprite("floor", local_c)
 		spr.z_index  = 0
 		spr.visible  = false
-		var rid: int = tile_to_room.get(cell, -1)
-		_floor_sprites.append({"sprite": spr, "rid": rid})
+		var rid: int = tile_to_room.get(Vector3i(cell.x, cell.y, 0), -1)
+		_floor_sprites.append({"sprite": spr, "rid": rid, "floor_idx": 0})
 		add_child(spr)
 
 
@@ -452,7 +513,7 @@ func _spawn_furn_sprites() -> void:
 				continue
 			var rot:     int      = _data.get_furn_rot(tx, ty)
 			var local_c: Vector2  = _cell_local(tx, ty)
-			var rid:     int      = tile_to_room.get(Vector2i(tx, ty), -1)
+			var rid:     int      = tile_to_room.get(Vector3i(tx, ty, 0), -1)
 			var is_tall: bool     = furn in TALL_FURN
 
 			# ── Sprite-sheet furniture (e.g. FURN_COUCH) ─────────────────────
@@ -477,7 +538,7 @@ func _spawn_furn_sprites() -> void:
 				spr.scale           = Vector2(sc, sc)
 				spr.z_index         = (tx + ty) * 2
 				spr.visible         = false
-				_furn_sprites.append({"sprite": spr, "rid": rid, "is_tall": is_tall, "tile": Vector2i(tx, ty)})
+				_furn_sprites.append({"sprite": spr, "rid": rid, "is_tall": is_tall, "tile": Vector2i(tx, ty), "floor_idx": 0})
 				add_child(spr)
 				continue
 
@@ -515,9 +576,156 @@ func _spawn_furn_sprites() -> void:
 			spr.visible  = false
 
 			_furn_sprites.append({
-				"sprite":  spr,
-				"rid":     rid,
-				"is_tall": is_tall,
-				"tile":    Vector2i(tx, ty),
+				"sprite":    spr,
+				"rid":       rid,
+				"is_tall":   is_tall,
+				"tile":      Vector2i(tx, ty),
+				"floor_idx": 0,
 			})
 			add_child(spr)
+
+
+# ── Upper-floor sprite spawning ────────────────────────────────────────────────
+## Spawns wall, floor, and furniture sprites for every upper floor stored in the
+## blueprint.  Each sprite is tagged with its floor_idx so _apply_sprite_alphas()
+## can hide non-current-floor sprites and the set_current_floor() path works.
+
+func _spawn_upper_floor_sprites() -> void:
+	if _bp == null or _bp.upper_floors.is_empty():
+		return
+	var story_h_px: float = float(_bp.story_h_tiles) * WALL_H_PER_TILE
+	for fi in _bp.upper_floors.size():
+		var fd: BuildingBlueprint.FloorData = _bp.upper_floors[fi]
+		var floor_idx := fi + 1
+		# Vertical offset in local space: upper floor sits above ground-floor walls.
+		var y_off := -story_h_px * float(floor_idx)
+		_spawn_upper_wall_sprites(fd, floor_idx, y_off)
+		_spawn_upper_floor_tile_sprites(fd, floor_idx, y_off)
+		_spawn_upper_furn_sprites(fd, floor_idx, y_off)
+
+
+func _spawn_upper_wall_sprites(fd: BuildingBlueprint.FloorData,
+		floor_idx: int, y_off: float) -> void:
+	var b        := _bp.bounds
+	var h_tiles  : int    = _bp.story_h_tiles
+	var h_str    : String = str(h_tiles)
+
+	for ek: Vector3i in fd.wall_edges:
+		var tx   : int  = ek.x
+		var ty   : int  = ek.y
+		var dir  : int  = ek.z
+		var local_c := _cell_local(tx, ty) + Vector2(0.0, y_off)
+
+		if dir == MapData.DIR_N:
+			var is_win := fd.window_edges.has(ek)
+			var is_door := fd.door_edges.has(ek)
+			var key := ""
+			if is_door:
+				key = "door_ne_%s" % h_str
+			elif is_win:
+				var st: int = fd.window_edges[ek]
+				key = "win_ne_%d_%s" % [st, h_str]
+			else:
+				key = "wall_ne_%s" % h_str
+			_add_wall_sprite(key, local_c, false, tx, ty, dir, b,
+					ek, is_win and not is_door, false, h_str, floor_idx)
+
+		elif dir == MapData.DIR_W:
+			var is_win := fd.window_edges.has(ek)
+			var is_door := fd.door_edges.has(ek)
+			var key := ""
+			if is_door:
+				key = "door_nw_%s" % h_str
+			elif is_win:
+				var st: int = fd.window_edges[ek]
+				key = "win_nw_%d_%s" % [st, h_str]
+			else:
+				key = "wall_nw_%s" % h_str
+			_add_wall_sprite(key, local_c, false, tx, ty, dir, b,
+					ek, is_win and not is_door, true, h_str, floor_idx)
+
+
+func _spawn_upper_floor_tile_sprites(fd: BuildingBlueprint.FloorData,
+		floor_idx: int, y_off: float) -> void:
+	if not BuildingComponentBaker.has_component("floor"):
+		return
+	for room: BuildingBlueprint.RoomDef in fd.rooms:
+		for cell_v in room.floor_cells:
+			var cell    := cell_v as Vector2i
+			var local_c := _cell_local(cell.x, cell.y) + Vector2(0.0, y_off)
+			var spr     := BuildingComponentBaker.get_sprite("floor", local_c)
+			spr.z_index  = floor_idx * FLOOR_Z_STRIDE
+			spr.visible  = false
+			var rid: int = tile_to_room.get(Vector3i(cell.x, cell.y, floor_idx), -1)
+			_floor_sprites.append({"sprite": spr, "rid": rid, "floor_idx": floor_idx})
+			add_child(spr)
+
+
+func _spawn_upper_furn_sprites(fd: BuildingBlueprint.FloorData,
+		floor_idx: int, y_off: float) -> void:
+	var sheet_specs := FurnitureLibrary.get_sprite_sheet_specs()
+	for cell_v: Vector2i in fd.furniture:
+		var cell := cell_v as Vector2i
+		var furn : int    = fd.get_furniture_at(cell.x, cell.y)
+		var rot  : int    = fd.get_furn_rot_at(cell.x, cell.y)
+		if furn == MapData.FURN_NONE:
+			continue
+		var local_c : Vector2 = _cell_local(cell.x, cell.y) + Vector2(0.0, y_off)
+		var rid     : int     = tile_to_room.get(Vector3i(cell.x, cell.y, floor_idx), -1)
+		var is_tall : bool    = furn in TALL_FURN
+
+		if sheet_specs.has(furn):
+			var sd: Dictionary = sheet_specs[furn]
+			var tex: Texture2D = FurnitureLibrary.load_sheet_texture(sd["path"])
+			if tex == null:
+				continue
+			var fw  : int      = tex.get_width()  / (sd["frame_cols"] as int)
+			var fh  : int      = tex.get_height() / (sd["frame_rows"] as int)
+			var rf  : Vector2i = sd["rot_frames"].get(rot, Vector2i(0, 0))
+			var atlas        := AtlasTexture.new()
+			atlas.atlas       = tex
+			atlas.region      = Rect2(rf.x * fw, rf.y * fh, fw, fh)
+			var sc   : float  = sd["scale"]
+			var af   : Vector2 = sd["anchor_frac"]
+			var spr           := Sprite2D.new()
+			spr.texture        = atlas
+			spr.centered       = false
+			spr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+			spr.position       = local_c + Vector2(-af.x * fw, -af.y * fh) * sc
+			spr.scale          = Vector2(sc, sc)
+			spr.z_index        = (cell.x + cell.y) * 2 + floor_idx * FLOOR_Z_STRIDE
+			spr.visible        = false
+			_furn_sprites.append({"sprite": spr, "rid": rid, "is_tall": is_tall,
+					"tile": cell, "floor_idx": floor_idx})
+			add_child(spr)
+			continue
+
+		var spec: Dictionary = FurnitureLibrary.spec_for_furn(furn, rot)
+		if spec.is_empty():
+			continue
+		var key: String = FurnitureBaker.box_key(
+				spec["sn"], spec["se"], spec["h"],
+				spec["top_c"], spec["side_c"], rot)
+		if not FurnitureBaker.has_texture(key):
+			continue
+		var nv: Vector2
+		var ev: Vector2
+		match rot:
+			1:
+				nv = FurnitureBaker.BAKE_EV * spec["sn"]
+				ev = Vector2(0.0, -FurnitureBaker.BAKE_NV.y) * spec["se"]
+			2:
+				nv = -FurnitureBaker.BAKE_NV * spec["sn"]
+				ev = -FurnitureBaker.BAKE_EV * spec["se"]
+			3:
+				nv = -FurnitureBaker.BAKE_EV * spec["sn"]
+				ev = Vector2(0.0, FurnitureBaker.BAKE_NV.y) * spec["se"]
+			_:
+				nv = FurnitureBaker.BAKE_NV * spec["sn"]
+				ev = FurnitureBaker.BAKE_EV * spec["se"]
+		var spr     := FurnitureBaker.make_sprite(key, nv, ev, local_c, rot)
+		spr.z_index  = (cell.x + cell.y) * 2 + floor_idx * FLOOR_Z_STRIDE
+		spr.visible  = false
+		_furn_sprites.append({"sprite": spr, "rid": rid, "is_tall": is_tall,
+				"tile": cell, "floor_idx": floor_idx})
+		add_child(spr)

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "PZClone (Run Game)",
+      "runtimeExecutable": "C:\\Users\\And0t\\Godot_v4.6.1-stable_win64.exe",
+      "runtimeArgs": ["--path", "C:\\Users\\And0t\\PZClone"],
+      "port": 7777
+    },
+    {
+      "name": "AssetComposer",
+      "runtimeExecutable": "C:\\Users\\And0t\\Godot_v4.6.1-stable_win64.exe",
+      "runtimeArgs": ["--path", "C:\\Users\\And0t\\PZClone", "--scene", "res://tools/AssetComposer.tscn"],
+      "port": 7778
+    }
+  ]
+}

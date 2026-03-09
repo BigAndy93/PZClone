@@ -40,10 +40,11 @@ var _chunk_manager:          ChunkManager
 var _room_detection_service: RoomDetectionService
 
 # Cutaway / visibility state
-var _cutaway_timer:    float                = 0.0
-var _current_interior: BuildingTileRenderer = null
-var _player_tile:      Vector2i             = Vector2i(-9999, -9999)
-var _player_room_id:   int                  = -1
+var _cutaway_timer:      float                = 0.0
+var _current_interior:   BuildingTileRenderer = null
+var _player_tile:        Vector2i             = Vector2i(-9999, -9999)
+var _player_room_id:     int                  = -1
+var _player_current_floor: int               = 0   # which storey the local player is on
 
 
 func _ready() -> void:
@@ -148,9 +149,15 @@ func _update_building_cutaway() -> void:
 
 	# Tile-change detection — only recompute when player moves to a new tile
 	# or changes which building they are in.  (System 10 performance rule.)
-	if tile_map == _player_tile and new_interior == _current_interior:
+	# Read the current floor from the player node (synced variable).
+	var new_floor: int = local_player.get("sync_current_floor") if \
+			local_player.get("sync_current_floor") != null else 0
+
+	if tile_map == _player_tile and new_interior == _current_interior \
+			and new_floor == _player_current_floor:
 		return
-	_player_tile = tile_map
+	_player_tile          = tile_map
+	_player_current_floor = new_floor
 
 	# Handle building entry / exit transitions.
 	if new_interior != _current_interior:
@@ -168,40 +175,76 @@ func _update_building_cutaway() -> void:
 	if _current_interior == null:
 		return
 
-	# Determine which room the player is standing in.
-	var new_room_id := _find_room_at_tile(_current_interior._bp, tile_map)
+	# Push the active floor to the renderer before room-lookup so sprites for
+	# the right floor are visible.
+	_current_interior.set_current_floor(new_floor)
+
+	# Determine which room the player is standing in on their current floor.
+	var new_room_id := _find_room_at_tile_on_floor(
+			_current_interior._bp, tile_map, new_floor)
 	_player_room_id  = new_room_id
 
 	# Find adjacent rooms reachable through a door or window.
 	var adjacent: Array = []
 	if new_room_id >= 0:
-		adjacent = _find_adjacent_rooms(_current_interior._bp, new_room_id)
+		adjacent = _find_adjacent_rooms_on_floor(
+				_current_interior._bp, new_room_id, new_floor)
 
 	_current_interior.set_visibility_data(new_room_id, adjacent, true, tile_map)
 	_update_entity_visibility(local_player)
 
 
 ## Returns the room_id of the RoomDef whose floor_cells contain tile,
-## or -1 if no room claims that tile.
+## or -1 if no room claims that tile.  Kept for legacy callers.
 func _find_room_at_tile(bp: BuildingBlueprint, tile: Vector2i) -> int:
-	for room: BuildingBlueprint.RoomDef in bp.rooms:
+	return _find_room_at_tile_on_floor(bp, tile, 0)
+
+
+## Floor-aware version: searches only the rooms on the given floor index.
+func _find_room_at_tile_on_floor(bp: BuildingBlueprint,
+		tile: Vector2i, floor: int) -> int:
+	var rooms: Array = bp.rooms if floor == 0 else \
+			(bp.upper_floors[floor - 1].rooms if bp.upper_floors.size() >= floor else [])
+	for room: BuildingBlueprint.RoomDef in rooms:
 		if tile in room.floor_cells:
 			return room.id
 	return -1
 
 
 ## Returns a list of room_ids that are directly connected to player_room_id
-## via at least one door or window opening.
+## via at least one door or window opening.  Legacy (floor 0) shim.
 func _find_adjacent_rooms(bp: BuildingBlueprint, room_id: int) -> Array:
+	return _find_adjacent_rooms_on_floor(bp, room_id, 0)
+
+
+## Floor-aware adjacent-room finder.
+func _find_adjacent_rooms_on_floor(bp: BuildingBlueprint,
+		room_id: int, floor: int) -> Array:
+	# Pick the room list and edge dictionaries for this floor.
+	var rooms: Array
+	var door_dict: Dictionary
+	var win_dict:  Dictionary
+	if floor == 0:
+		rooms      = bp.rooms
+		door_dict  = _map_data.door_edges
+		win_dict   = _map_data.window_edges
+	elif bp.upper_floors.size() >= floor:
+		var fd: BuildingBlueprint.FloorData = bp.upper_floors[floor - 1]
+		rooms     = fd.rooms
+		door_dict = fd.door_edges
+		win_dict  = fd.window_edges
+	else:
+		return []
+
 	var player_room: BuildingBlueprint.RoomDef = null
-	for room: BuildingBlueprint.RoomDef in bp.rooms:
+	for room: BuildingBlueprint.RoomDef in rooms:
 		if room.id == room_id:
 			player_room = room
 			break
 	if player_room == null:
 		return []
 
-	var adjacent: Array     = []
+	var adjacent: Array      = []
 	var checked:  Dictionary = {}
 
 	for cell_v in player_room.floor_cells:
@@ -211,8 +254,7 @@ func _find_adjacent_rooms(bp: BuildingBlueprint, room_id: int) -> Array:
 			if checked.has(ek):
 				continue
 			checked[ek] = true
-			# Check for a door or window at this edge.
-			if _map_data.door_edges.has(ek) or _map_data.window_edges.has(ek):
+			if door_dict.has(ek) or win_dict.has(ek):
 				var nx := cell.x
 				var ny := cell.y
 				match dir:
@@ -220,7 +262,7 @@ func _find_adjacent_rooms(bp: BuildingBlueprint, room_id: int) -> Array:
 					MapData.DIR_S: ny += 1
 					MapData.DIR_E: nx += 1
 					MapData.DIR_W: nx -= 1
-				var nrid := _find_room_at_tile(bp, Vector2i(nx, ny))
+				var nrid := _find_room_at_tile_on_floor(bp, Vector2i(nx, ny), floor)
 				if nrid >= 0 and nrid != room_id and nrid not in adjacent:
 					adjacent.append(nrid)
 	return adjacent
@@ -803,3 +845,158 @@ func rpc_sync_wall_batch(edges: Array) -> void:
 	for renderer: BuildingTileRenderer in _building_renderers:
 		if is_instance_valid(renderer):
 			renderer.queue_redraw()
+
+
+# ── Debug editor RPCs (debug builds only) ─────────────────────────────────────
+# Client → Server request functions validate is_server(), apply changes, then
+# broadcast via the matching rpc_debug_sync_* RPC (call_local, skips server).
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_set_tile(tx: int, ty: int, tile_type: int) -> void:
+	if not multiplayer.is_server():
+		return
+	_map_data.set_tile(tx, ty, tile_type)
+	rpc_debug_sync_tile.rpc(tx, ty, tile_type)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_debug_sync_tile(tx: int, ty: int, tile_type: int) -> void:
+	if multiplayer.is_server():
+		return
+	_map_data.set_tile(tx, ty, tile_type)
+	tilemap.queue_redraw()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_set_furniture(tx: int, ty: int, furn_type: int, rot: int) -> void:
+	if not multiplayer.is_server():
+		return
+	_map_data.set_furniture(tx, ty, furn_type)
+	_map_data.set_furn_rot(tx, ty, rot)
+	_map_data.set_occupied(tx, ty, furn_type != MapData.FURN_NONE)
+	rpc_debug_sync_furniture.rpc(tx, ty, furn_type, rot)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_debug_sync_furniture(tx: int, ty: int, furn_type: int, rot: int) -> void:
+	if multiplayer.is_server():
+		return
+	_map_data.set_furniture(tx, ty, furn_type)
+	_map_data.set_furn_rot(tx, ty, rot)
+	_map_data.set_occupied(tx, ty, furn_type != MapData.FURN_NONE)
+	for renderer: BuildingTileRenderer in _building_renderers:
+		if is_instance_valid(renderer):
+			renderer.refresh_furniture()
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_set_wall(tx: int, ty: int, dir: int, place: bool) -> void:
+	if not multiplayer.is_server():
+		return
+	if place:
+		_map_data.add_wall_edge(tx, ty, dir)
+	else:
+		_map_data.remove_wall_edge(tx, ty, dir)
+	var ck := MapData.edge_key(tx, ty, dir)
+	_wall_collision_manager.rebuild_tile(ck.x, ck.y)
+	rpc_debug_sync_wall.rpc(tx, ty, dir, place)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_debug_sync_wall(tx: int, ty: int, dir: int, place: bool) -> void:
+	if multiplayer.is_server():
+		return
+	if place:
+		_map_data.add_wall_edge(tx, ty, dir)
+	else:
+		_map_data.remove_wall_edge(tx, ty, dir)
+	for renderer: BuildingTileRenderer in _building_renderers:
+		if is_instance_valid(renderer):
+			renderer.refresh_walls()
+
+
+## edge_mode: 0=plain_wall  1=door  2=window
+## state: window WIN_* state (0-3); -1 = remove the edge
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_set_edge(tx: int, ty: int, dir: int, edge_mode: int, state: int) -> void:
+	if not multiplayer.is_server():
+		return
+	var ek := MapData.edge_key(tx, ty, dir)
+	match edge_mode:
+		1:   # door
+			if state < 0:
+				_map_data.door_edges.erase(ek)
+			else:
+				_map_data.door_edges[ek] = _bp_story_h(tx, ty)
+		2:   # window
+			if state < 0:
+				_map_data.window_edges.erase(ek)
+			else:
+				_map_data.window_edges[ek] = state
+	rpc_debug_sync_edge.rpc(tx, ty, dir, edge_mode, state)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_debug_sync_edge(tx: int, ty: int, dir: int, edge_mode: int, state: int) -> void:
+	if multiplayer.is_server():
+		return
+	var ek := MapData.edge_key(tx, ty, dir)
+	match edge_mode:
+		1:
+			if state < 0:
+				_map_data.door_edges.erase(ek)
+			else:
+				_map_data.door_edges[ek] = _bp_story_h(tx, ty)
+		2:
+			if state < 0:
+				_map_data.window_edges.erase(ek)
+			else:
+				_map_data.window_edges[ek] = state
+	for renderer: BuildingTileRenderer in _building_renderers:
+		if is_instance_valid(renderer):
+			renderer.refresh_walls()
+
+
+## prop_type = -1 removes the prop at tile_pos; otherwise spawns a new WorldProp.
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_set_prop(tile_pos: Vector2i, prop_type: int) -> void:
+	if not multiplayer.is_server():
+		return
+	rpc_debug_sync_prop.rpc(tile_pos, prop_type)
+
+
+@rpc("authority", "call_local", "reliable")
+func rpc_debug_sync_prop(tile_pos: Vector2i, prop_type: int) -> void:
+	if prop_type < 0:
+		# Remove existing prop at this tile.
+		for child in entities_container.get_children():
+			if child is WorldProp and child.tile_pos == tile_pos:
+				child.queue_free()
+				break
+	else:
+		# Remove any existing prop first (prevent duplicates).
+		for child in entities_container.get_children():
+			if child is WorldProp and child.tile_pos == tile_pos:
+				child.queue_free()
+				break
+		var cell := tile_pos + _map_data.origin_offset
+		var prop             := WorldProp.new()
+		prop.prop_type        = prop_type
+		prop.tile_pos         = tile_pos
+		prop.position         = tilemap.map_to_local(cell)
+		entities_container.add_child(prop)
+
+
+@rpc("any_peer", "call_remote", "reliable")
+func rpc_debug_spawn_zombie(world_pos: Vector2, zombie_type: int) -> void:
+	spawn_zombie_at_typed(world_pos, zombie_type)
+
+
+# ── Debug helper ──────────────────────────────────────────────────────────────
+## Returns the story height (in tiles) of the building that covers this tile,
+## or 3 as a sensible fallback for debug-placed doors.
+func _bp_story_h(tx: int, ty: int) -> int:
+	for bp: BuildingBlueprint in _map_data.building_blueprints:
+		if bp.bounds.has_point(Vector2i(tx, ty)):
+			return bp.story_h_tiles
+	return 3
